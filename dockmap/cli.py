@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# by trippm@tripplab.com [Feb 2026]
+
 import argparse
 from pathlib import Path
 import numpy as np
