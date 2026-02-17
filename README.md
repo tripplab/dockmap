@@ -1,6 +1,9 @@
 # dockmap (v0.3.2)
 
-Create a creative 2D “world map” of docking locations on a protein surface from many peptide poses, with an overlay of a known PPI region. The protein surface is computed internally (QuickSurf-like Gaussian density + isosurface extraction) with no external surface tools and no `scikit-image`.
+Creative 2D “world map” of docking locations on a protein surface from many peptide poses, 
+with an overlay of a known PPI region. The protein surface is computed internally 
+(QuickSurf-like Gaussian density + isosurface extraction) with no external surface tools 
+and no `scikit-image`.
 
 ---
 
