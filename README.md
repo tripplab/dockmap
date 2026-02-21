@@ -137,6 +137,7 @@ dockmap \
   --peptides peptide_poses.pdb \
   --scores vina_scores.txt \
   --ppi-file ppi.txt \
+  --cluster-distance 15 \
   --out-prefix docking_map
 ```
 
@@ -163,7 +164,8 @@ dockmap \
 Typical outputs are:
 
 - `docking_map.png` (or `pdf`/`svg`, depending on `--out-format`)
-- `docking_map_poses_mapped.csv`
+- `docking_map_poses_mapped.csv` (now includes `cluster_id`, ordered by cluster then score)
+- `docking_map_clusters.csv` (cluster summary statistics)
 - `docking_map_ppi_contour_mapped.csv` (when contour footprint is generated)
 - `docking_map_ppi_residue_points_mapped.csv` (when residue-point footprint is generated)
 - `docking_map_quicksurf.ply` (if `--export-mesh`)
@@ -179,6 +181,13 @@ If matplotlib complains about display/X11:
 ```bash
 export MPLBACKEND=Agg
 ```
+
+### Pose clustering
+
+Pose clustering uses **spherical angular distance** on `(theta, phi)` (great-circle distance on the unit sphere).
+`theta` and `phi` are written in **radians** in CSV outputs.
+
+Use `--cluster-distance` in **degrees** to set the clustering threshold (default: `15`).
 
 ### Raycast projection
 
