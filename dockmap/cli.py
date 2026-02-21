@@ -32,6 +32,7 @@ from .surface import build_quicksurf_mesh, QuickSurfSpec, sample_field_trilinear
 from .project import project_point_to_surface_nearest, project_point_to_surface_raycast
 from .mapproj import surface_point_to_spherical_uv, auto_seam_rotation, apply_seam_rotation
 from .ppi import ppi_residue_points_uv, ppi_atom_cloud_uv
+from .clustering import cluster_connected_components, reorder_clusters_and_poses
 from .viz import plot_map, PlotSpec
 
 log = get_logger(__name__)
@@ -281,6 +282,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "Use 0 for no rotation. Example: --seam-rotate 90."
         ),
     )
+    g_proj.add_argument(
+        "--cluster-distance",
+        type=float,
+        default=15.0,
+        help=(
+            "Angular distance threshold (degrees) used to cluster poses on the sphere by (theta, phi). "
+            "Poses are connected when great-circle distance is <= this threshold; singleton poses become "
+            "single-pose clusters."
+        ),
+    )
 
     # -----------------------
     # Output
@@ -439,6 +450,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
     configure_logging(args.verbose)
+
+    if args.cluster_distance <= 0:
+        raise SystemExit("--cluster-distance must be > 0 degrees.")
 
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
@@ -768,13 +782,57 @@ def main(argv: list[str] | None = None) -> int:
     # ---- CSV outputs
     if args.write_csv:
         with Timer("Write CSV outputs", log):
+            cluster_threshold_rad = np.deg2rad(float(args.cluster_distance))
+            raw_cluster_labels = cluster_connected_components(pose_theta, pose_phi, cluster_threshold_rad)
+            ordered_idx, cluster_ids, cluster_summaries = reorder_clusters_and_poses(
+                pose_theta,
+                pose_phi,
+                scores,
+                pose_ids,
+                raw_cluster_labels,
+            )
+
             pose_csv = out_prefix.with_name(out_prefix.name + "_poses_mapped.csv")
             with pose_csv.open("w", newline="") as f:
                 wcsv = csv.writer(f)
-                wcsv.writerow(["pose_id", "vina_score", "theta", "phi", "proj_distance"])
-                for i in range(len(pose_theta)):
-                    wcsv.writerow([pose_ids[i], scores[i], pose_theta[i], pose_phi[i], pose_dist[i]])
+                wcsv.writerow(["pose_id", "vina_score", "theta", "phi", "proj_distance", "cluster_id"])
+                for i in ordered_idx:
+                    wcsv.writerow([pose_ids[i], scores[i], pose_theta[i], pose_phi[i], pose_dist[i], cluster_ids[i]])
             log.info("Wrote CSV: %s", pose_csv)
+
+            clusters_csv = out_prefix.with_name(out_prefix.name + "_clusters.csv")
+            with clusters_csv.open("w", newline="") as f:
+                wcsv = csv.writer(f)
+                wcsv.writerow(
+                    [
+                        "cluster_id",
+                        "n_poses",
+                        "best_pose_id",
+                        "best_vina_score",
+                        "vina_score_min",
+                        "vina_score_max",
+                        "vina_score_avg",
+                        "vina_score_stddev",
+                        "theta_centroid",
+                        "phi_centroid",
+                    ]
+                )
+                for row in cluster_summaries:
+                    wcsv.writerow(
+                        [
+                            row["cluster_id"],
+                            row["n_poses"],
+                            row["best_pose_id"],
+                            row["best_vina_score"],
+                            row["vina_score_min"],
+                            row["vina_score_max"],
+                            row["vina_score_avg"],
+                            row["vina_score_stddev"],
+                            row["theta_centroid"],
+                            row["phi_centroid"],
+                        ]
+                    )
+            log.info("Wrote CSV: %s", clusters_csv)
 
             if ppi_contour_theta is not None and ppi_contour_phi is not None:
                 ppi_csv = out_prefix.with_name(out_prefix.name + "_ppi_contour_mapped.csv")
@@ -797,4 +855,3 @@ def main(argv: list[str] | None = None) -> int:
 
     log.info("dockmap pipeline complete")
     return 0
-

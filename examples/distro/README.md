@@ -73,6 +73,7 @@ dockmap -v \
 [INFO] dockmap.cli: Wrote map: docking_map_example_01.png
 [INFO] dockmap.cli: Write CSV outputs ...
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_01_poses_mapped.csv
+[INFO] dockmap.cli: Wrote CSV: docking_map_example_01_clusters.csv
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_01_ppi_contour_mapped.csv
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_01_ppi_residue_points_mapped.csv
 [INFO] dockmap.cli: Write CSV outputs done (0.00s)
@@ -138,6 +139,7 @@ dockmap -v \
 [INFO] dockmap.cli: Wrote map: docking_map_example_02.png
 [INFO] dockmap.cli: Write CSV outputs ...
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_02_poses_mapped.csv
+[INFO] dockmap.cli: Wrote CSV: docking_map_example_02_clusters.csv
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_02_ppi_contour_mapped.csv
 [INFO] dockmap.cli: Wrote CSV: docking_map_example_02_ppi_residue_points_mapped.csv
 [INFO] dockmap.cli: Write CSV outputs done (0.00s)
