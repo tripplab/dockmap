@@ -3,6 +3,7 @@ from __future__ import annotations
 # by trippm@tripplab.com [Feb 2026]
 
 import argparse
+import numbers
 from pathlib import Path
 import numpy as np
 import csv
@@ -36,6 +37,13 @@ from .clustering import cluster_connected_components, reorder_clusters_and_poses
 from .viz import plot_map, PlotSpec
 
 log = get_logger(__name__)
+
+
+def _format_csv_cell(value: object) -> object:
+    """Format float-like CSV values to 3 decimals; leave other types unchanged."""
+    if isinstance(value, numbers.Real) and not isinstance(value, numbers.Integral):
+        return f"{float(value):.3f}"
+    return value
 
 
 class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
@@ -833,7 +841,16 @@ def main(argv: list[str] | None = None) -> int:
                 wcsv = csv.writer(f)
                 wcsv.writerow(["pose_id", "vina_score", "theta", "phi", "proj_distance", "cluster_id"])
                 for i in ordered_idx:
-                    wcsv.writerow([pose_ids[i], scores[i], pose_theta[i], pose_phi[i], pose_dist[i], cluster_ids[i]])
+                    wcsv.writerow(
+                        [
+                            pose_ids[i],
+                            _format_csv_cell(scores[i]),
+                            _format_csv_cell(pose_theta[i]),
+                            _format_csv_cell(pose_phi[i]),
+                            _format_csv_cell(pose_dist[i]),
+                            cluster_ids[i],
+                        ]
+                    )
             log.info("Wrote CSV: %s", pose_csv)
 
             clusters_csv = out_prefix.with_name(out_prefix.name + "_clusters.csv")
@@ -859,13 +876,13 @@ def main(argv: list[str] | None = None) -> int:
                             row["cluster_id"],
                             row["n_poses"],
                             row["best_pose_id"],
-                            row["best_vina_score"],
-                            row["vina_score_min"],
-                            row["vina_score_max"],
-                            row["vina_score_avg"],
-                            row["vina_score_stddev"],
-                            row["theta_centroid"],
-                            row["phi_centroid"],
+                            _format_csv_cell(row["best_vina_score"]),
+                            _format_csv_cell(row["vina_score_min"]),
+                            _format_csv_cell(row["vina_score_max"]),
+                            _format_csv_cell(row["vina_score_avg"]),
+                            _format_csv_cell(row["vina_score_stddev"]),
+                            _format_csv_cell(row["theta_centroid"]),
+                            _format_csv_cell(row["phi_centroid"]),
                         ]
                     )
             log.info("Wrote CSV: %s", clusters_csv)
@@ -876,7 +893,10 @@ def main(argv: list[str] | None = None) -> int:
                     wcsv = csv.writer(f)
                     wcsv.writerow(["theta", "phi"])
                     for i in range(len(ppi_contour_theta)):
-                        wcsv.writerow([ppi_contour_theta[i], ppi_contour_phi[i]])
+                        wcsv.writerow([
+                            _format_csv_cell(ppi_contour_theta[i]),
+                            _format_csv_cell(ppi_contour_phi[i]),
+                        ])
                 log.info("Wrote CSV: %s", ppi_csv)
 
             if ppi_points_theta is not None and ppi_points_phi is not None:
@@ -886,7 +906,11 @@ def main(argv: list[str] | None = None) -> int:
                     wcsv.writerow(["theta", "phi", "label"])
                     for i in range(len(ppi_points_theta)):
                         lab = "" if (ppi_points_labels is None or i >= len(ppi_points_labels)) else ppi_points_labels[i]
-                        wcsv.writerow([ppi_points_theta[i], ppi_points_phi[i], lab])
+                        wcsv.writerow([
+                            _format_csv_cell(ppi_points_theta[i]),
+                            _format_csv_cell(ppi_points_phi[i]),
+                            lab,
+                        ])
                 log.info("Wrote CSV: %s", ppi_csv2)
 
     log.info("dockmap pipeline complete")
