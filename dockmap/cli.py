@@ -39,7 +39,10 @@ log = get_logger(__name__)
 
 
 class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
-    pass
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("max_help_position", 34)
+        kwargs.setdefault("width", 110)
+        super().__init__(*args, **kwargs)
 
 
 def _pose_id_to_ligid(pose_id: str) -> str:
@@ -90,6 +93,12 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="dockmap",
         description="2D surface map of docking sites + PPI overlay",
         formatter_class=_HelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  dockmap --protein prot.pdb --peptides poses.pdb --scores scores.txt --ppi-file ppi.txt\n"
+            "  dockmap ... --map hammer --pose-layer centroid --cluster-contour outline\n"
+            "  dockmap ... --cluster-contour filled --cluster-contour-color black"
+        ),
     )
 
     # -----------------------
@@ -322,14 +331,32 @@ def _build_parser() -> argparse.ArgumentParser:
     g_adv.add_argument(
         "--pose-layer",
         default="density",
-        choices=["scatter", "density", "hexbin", "trace"],
+        choices=["scatter", "density", "hexbin", "trace", "centroid"],
         help=(
             "How peptide poses are drawn on the 2D map. "
             "Choices: "
             "'scatter' = plot one marker per pose (best for small N or top-N subsets); "
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
-            "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s)."
+            "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
+            "'centroid' = one marker per cluster centroid, labeled by cluster rank (1 = largest cluster)."
+        ),
+    )
+    g_adv.add_argument(
+        "--cluster-contour",
+        default="none",
+        choices=["none", "outline", "filled"],
+        help=(
+            "Draw per-cluster convex hulls in projected 2D map space. "
+            "'outline' draws hull lines; 'filled' adds translucent fills + outlines."
+        ),
+    )
+    g_adv.add_argument(
+        "--cluster-contour-color",
+        default=None,
+        help=(
+            "Optional single matplotlib color for all cluster contours (e.g., 'black', '#3366ff'). "
+            "If omitted, contours are colored by cluster size rank from red (largest) to blue (smallest)."
         ),
     )
     g_adv.add_argument(
@@ -348,7 +375,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="exp",
         choices=["none", "exp", "linear"],
         help=(
-            "How poses are weighted when aggregating into 'density' or 'hexbin' layers (ignored for scatter/trace). "
+            "How poses are weighted when aggregating into 'density' or 'hexbin' layers (ignored for scatter/trace/centroid). "
             "Choices: "
             "'none' = all poses contribute equally; "
             "'linear' = linearly rescale weights by score (emphasizes better scores); "
@@ -669,6 +696,20 @@ def main(argv: list[str] | None = None) -> int:
             write_mesh(mesh, mesh_path, args.mesh_format, vertex_scalar=vscalar, scalar_name=sname or "scalar")
         log.info("Wrote mesh: %s", mesh_path)
 
+    # ---- Clusters from mapped pose centers (used for contours, centroid layer, and CSV outputs)
+    cluster_threshold_rad = np.deg2rad(float(args.cluster_distance))
+    raw_cluster_labels = cluster_connected_components(pose_theta, pose_phi, cluster_threshold_rad)
+    ordered_idx, cluster_ids, cluster_summaries = reorder_clusters_and_poses(
+        pose_theta,
+        pose_phi,
+        scores,
+        pose_ids,
+        raw_cluster_labels,
+    )
+
+    cluster_theta = np.array([float(row["theta_centroid"]) for row in cluster_summaries], dtype=float)
+    cluster_phi = np.array([float(row["phi_centroid"]) for row in cluster_summaries], dtype=float)
+
     # ---- Pose labels selection (scatter/trace only)
     pose_labels: list[str] | None = None
     if args.pose_layer in {"scatter", "trace"} and args.pose_label != "none":
@@ -768,6 +809,11 @@ def main(argv: list[str] | None = None) -> int:
             # UPDATED: pass multiple traces
             trace_lines=trace_lines,
             trace_labels=trace_labels,
+            cluster_ids=cluster_ids,
+            cluster_theta=cluster_theta,
+            cluster_phi=cluster_phi,
+            cluster_contour=args.cluster_contour,
+            cluster_contour_color=args.cluster_contour_color,
             background_colorbar=args.background_colorbar,
             background_colorbar_location=args.background_colorbar_location,
             background_colorbar_mode=args.background_colorbar_mode,
@@ -782,16 +828,6 @@ def main(argv: list[str] | None = None) -> int:
     # ---- CSV outputs
     if args.write_csv:
         with Timer("Write CSV outputs", log):
-            cluster_threshold_rad = np.deg2rad(float(args.cluster_distance))
-            raw_cluster_labels = cluster_connected_components(pose_theta, pose_phi, cluster_threshold_rad)
-            ordered_idx, cluster_ids, cluster_summaries = reorder_clusters_and_poses(
-                pose_theta,
-                pose_phi,
-                scores,
-                pose_ids,
-                raw_cluster_labels,
-            )
-
             pose_csv = out_prefix.with_name(out_prefix.name + "_poses_mapped.csv")
             with pose_csv.open("w", newline="") as f:
                 wcsv = csv.writer(f)
