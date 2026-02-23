@@ -29,38 +29,6 @@ class PlotSpec:
     dpi: int = 300
 
 
-def _convex_hull_xy(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """2D convex hull indices (monotone chain) in CCW order."""
-    pts = np.column_stack((x, y))
-    n = int(pts.shape[0])
-    if n <= 2:
-        return np.arange(n, dtype=int)
-
-    order = np.lexsort((pts[:, 1], pts[:, 0]))
-    p = pts[order]
-
-    def cross(o: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
-        return float((a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]))
-
-    lower: list[int] = []
-    for i in range(n):
-        while len(lower) >= 2 and cross(p[lower[-2]], p[lower[-1]], p[i]) <= 0.0:
-            lower.pop()
-        lower.append(i)
-
-    upper: list[int] = []
-    for i in range(n - 1, -1, -1):
-        while len(upper) >= 2 and cross(p[upper[-2]], p[upper[-1]], p[i]) <= 0.0:
-            upper.pop()
-        upper.append(i)
-
-    hull_local = lower[:-1] + upper[:-1]
-    hull_sorted = order[np.array(hull_local, dtype=int)]
-    if hull_sorted.size == 0:
-        return np.arange(n, dtype=int)
-    return hull_sorted
-
-
 def _cluster_colors(cluster_ids: np.ndarray, single_color: str | None) -> dict[int, tuple[float, float, float, float] | str]:
     unique = sorted({int(c) for c in cluster_ids.tolist()})
     if not unique:
@@ -72,6 +40,41 @@ def _cluster_colors(cluster_ids: np.ndarray, single_color: str | None) -> dict[i
     if n == 1:
         return {unique[0]: cmap(1.0)}
     return {cid: cmap(1.0 - (i / (n - 1))) for i, cid in enumerate(unique)}
+
+
+def _draw_cluster_kde_contour(ax, x: np.ndarray, y: np.ndarray, color, mode: str) -> None:
+    """Draw a smooth KDE-like contour from a cluster point cloud in projected 2D space."""
+    if x.size == 0:
+        return
+    if x.size == 1:
+        ax.scatter([x[0]], [y[0]], s=90, facecolors="none", edgecolors=[color], linewidths=1.5, zorder=3)
+        return
+
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    y_min, y_max = float(np.min(y)), float(np.max(y))
+    x_span = max(x_max - x_min, 1e-6)
+    y_span = max(y_max - y_min, 1e-6)
+    pad_x = max(0.30 * x_span, 0.05)
+    pad_y = max(0.30 * y_span, 0.05)
+
+    nx = ny = 90
+    x_edges = np.linspace(x_min - pad_x, x_max + pad_x, nx + 1)
+    y_edges = np.linspace(y_min - pad_y, y_max + pad_y, ny + 1)
+    H, _, _ = np.histogram2d(y, x, bins=[y_edges, x_edges])
+    Hs = _gaussian_blur_fft(H, sigma_px=2.6)
+
+    hmax = float(np.max(Hs))
+    if hmax <= 0.0:
+        return
+
+    x_cent = 0.5 * (x_edges[:-1] + x_edges[1:])
+    y_cent = 0.5 * (y_edges[:-1] + y_edges[1:])
+    X, Y = np.meshgrid(x_cent, y_cent)
+    level = max(0.25 * hmax, 1e-9)
+
+    if mode == "filled":
+        ax.contourf(X, Y, Hs, levels=[level, hmax], colors=[color], alpha=0.12, zorder=2.2)
+    ax.contour(X, Y, Hs, levels=[level], colors=[color], linewidths=1.5, zorder=3.1)
 
 
 def _weights_from_scores(scores: np.ndarray | None, mode: str) -> np.ndarray | None:
@@ -366,7 +369,7 @@ def plot_map(
     lat_w = np.concatenate([lat, lat, lat])
     w_w = None if w is None else np.concatenate([w, w, w])
 
-    # ---- Cluster contour overlay (convex hull in projected map space)
+    # ---- Cluster contour overlay (smooth KDE/isodensity blob per cluster)
     if cluster_contour != "none":
         if cluster_ids is None:
             raise ValueError("cluster_contour requested but cluster_ids not provided.")
@@ -376,18 +379,7 @@ def plot_map(
             idx = np.flatnonzero(cluster_ids == cid)
             if idx.size == 0:
                 continue
-            col = ccolors[cid]
-            if idx.size == 1:
-                ax.scatter([x_pose[idx[0]]], [y_pose[idx[0]]], s=90, facecolors="none", edgecolors=[col], linewidths=1.5, zorder=3)
-                continue
-            hidx = _convex_hull_xy(x_pose[idx], y_pose[idx])
-            hx = x_pose[idx][hidx]
-            hy = y_pose[idx][hidx]
-            hx = np.append(hx, hx[0])
-            hy = np.append(hy, hy[0])
-            if cluster_contour == "filled":
-                ax.fill(hx, hy, color=col, alpha=0.12, zorder=2.2)
-            ax.plot(hx, hy, color=col, linewidth=1.5, zorder=3.1)
+            _draw_cluster_kde_contour(ax, x_pose[idx], y_pose[idx], ccolors[cid], cluster_contour)
 
     # ---- Pose layers
     if plot_spec.pose_layer == "scatter":
@@ -481,7 +473,8 @@ def plot_map(
             linewidths=0.8,
             zorder=7,
         )
-        centroid_labels = [str(i + 1) for i in range(len(x))]
+        cluster_size_by_id = {int(cid): int(np.sum(cluster_ids == cid)) for cid in np.unique(cluster_ids)} if cluster_ids is not None else {}
+        centroid_labels = [f"{i + 1}:{cluster_size_by_id.get(i + 1, 0)}" for i in range(len(x))]
         _draw_pose_labels(ax, x, y, centroid_labels, dy=0.03, fontsize=8, zorder=8)
 
     elif plot_spec.pose_layer == "hexbin":

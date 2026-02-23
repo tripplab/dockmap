@@ -347,7 +347,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
             "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled by cluster rank (1 = largest cluster)."
+            "'centroid' = one marker per cluster centroid, labeled as 'rank:size' (example: 1:215)."
         ),
     )
     g_adv.add_argument(
@@ -355,8 +355,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default="none",
         choices=["none", "outline", "filled"],
         help=(
-            "Draw per-cluster convex hulls in projected 2D map space. "
-            "'outline' draws hull lines; 'filled' adds translucent fills + outlines."
+            "Draw per-cluster smooth KDE/isodensity contours in projected 2D map space. "
+            "'outline' draws contour lines; 'filled' adds translucent fills + outlines."
         ),
     )
     g_adv.add_argument(
