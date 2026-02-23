@@ -22,6 +22,7 @@ BackgroundCbarMode = Literal["norm", "raw"]
 @dataclass(frozen=True)
 class PlotSpec:
     map_name: str = "mollweide"
+    map_title: str | None = None
     pose_layer: str = "scatter"   # scatter|density|hexbin|trace|centroid
     weight_mode: str = "exp"      # none|exp|linear
     background: str = "none"      # none|curvature|radial
@@ -319,7 +320,7 @@ def plot_map(
     fig = plt.figure(figsize=(10, 5.2))
     ax = fig.add_subplot(111)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(f"Docking site map ({map_name})")
+    ax.set_title(plot_spec.map_title or f"Docking site map ({map_name})")
 
     # Background
     bg_mappable = None
