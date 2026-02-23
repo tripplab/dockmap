@@ -96,6 +96,15 @@ def _select_pose_indices_for_trace(mode: str, scores: np.ndarray, nposes: int) -
         raise ValueError(f"Invalid --trace-pose value: {mode!r} (use best, first, or integer N)") from e
 
 
+def _infer_map_title(protein_path: str, peptides_path: str, explicit_title: str | None) -> str:
+    """Return CLI title override, or derive one from --protein/--peptides filenames."""
+    if explicit_title:
+        return explicit_title
+    protein_name = Path(protein_path).stem
+    peptides_name = Path(peptides_path).stem
+    return f"{protein_name} vs {peptides_name}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="dockmap",
@@ -315,6 +324,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # -----------------------
     g_out = ap.add_argument_group("Output")
     g_out.add_argument("--out-prefix", default="dockmap", help="Output file prefix.")
+    g_out.add_argument(
+        "--map-title",
+        default=None,
+        help="Optional 2D map title override. If omitted, uses '<protein> vs <peptides>' from input filenames.",
+    )
     g_out.add_argument("--format", default="png", choices=["png", "pdf", "svg"], help="Figure format for the 2D map.")
     g_out.add_argument("--write-csv", action="store_true", default=True, help="Write CSV outputs (poses and PPI UV).")
 
@@ -858,6 +872,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ps = PlotSpec(
         map_name=args.map,
+        map_title=_infer_map_title(args.protein, args.peptides, args.map_title),
         pose_layer=args.pose_layer,
         weight_mode=args.weight,
         out_format=args.format,
