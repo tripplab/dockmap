@@ -492,6 +492,47 @@ def main(argv: list[str] | None = None) -> int:
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
 
+    log.info(
+        "Input options | protein=%s | peptides=%s | scores=%s | ppi_file=%s",
+        args.protein,
+        args.peptides,
+        args.scores,
+        args.ppi_file,
+    )
+    log.info(
+        "Surface options | radius_scale=%s | density_isovalue=%s | grid_spacing=%s | surface_quality=%s | cache_surface=%s",
+        args.radius_scale,
+        args.density_isovalue,
+        args.grid_spacing,
+        args.surface_quality,
+        args.cache_surface,
+    )
+    log.info(
+        "Projection options | map=%s | pose_layer=%s | pose_projection=%s | peptide_center=%s | seam_rotate=%s | cluster_distance_deg=%s",
+        args.map,
+        args.pose_layer,
+        args.pose_projection,
+        args.peptide_center,
+        args.seam_rotate,
+        args.cluster_distance,
+    )
+    log.info(
+        "PPI options | ppi_footprint=%s | ppi_atom_filter=%s | ppi_near_surface_eps=%s | ppi_residue_point=%s",
+        ",".join(args.ppi_footprint) if args.ppi_footprint else "atom_contour",
+        args.ppi_atom_filter,
+        args.ppi_near_surface_eps,
+        args.ppi_residue_point,
+    )
+    log.info(
+        "Output options | out_prefix=%s | format=%s | write_csv=%s | export_mesh=%s | mesh_format=%s | mesh_path=%s",
+        args.out_prefix,
+        args.format,
+        args.write_csv,
+        args.export_mesh,
+        args.mesh_format,
+        args.mesh_path,
+    )
+
     # ---- Load inputs
     with Timer("Load protein atoms", log):
         protein_atoms = load_protein_atoms(args.protein)
@@ -619,6 +660,14 @@ def main(argv: list[str] | None = None) -> int:
     seen = set()
     ppi_modes = [m for m in ppi_modes if not (m in seen or seen.add(m))]
 
+    log.info(
+        "Map PPI footprint step options | modes=%s | atom_filter=%s | near_surface_eps=%s | residue_point_mode=%s",
+        ",".join(ppi_modes),
+        args.ppi_atom_filter,
+        args.ppi_near_surface_eps,
+        args.ppi_residue_point,
+    )
+
     with Timer("Map PPI footprint to UV", log):
         if "atom_contour" in ppi_modes:
             th, ph = ppi_atom_cloud_uv(
@@ -657,6 +706,17 @@ def main(argv: list[str] | None = None) -> int:
     mesh_theta = mesh_phi = mesh_scalar = mesh_scalar_raw = None
 
     if args.background != "none":
+        log.info(
+            "Background step options | background=%s | background_smooth=%s | colorbar=%s | colorbar_mode=%s | colorbar_location=%s | colorbar_label=%s | vmin=%s | vmax=%s",
+            args.background,
+            args.background_smooth,
+            args.background_colorbar,
+            args.background_colorbar_mode,
+            args.background_colorbar_location,
+            args.background_colorbar_label,
+            args.background_colorbar_vmin,
+            args.background_colorbar_vmax,
+        )
         with Timer(f"Compute background scalar ({args.background})", log):
             vtx = mesh.vertices
             th = np.empty((vtx.shape[0],), float)
@@ -680,6 +740,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Export mesh (optional)
     if args.export_mesh:
+        log.info(
+            "Mesh export step options | mesh_format=%s | mesh_path=%s | mesh_vertex_scalar=%s | mesh_scalar_name=%s",
+            args.mesh_format,
+            args.mesh_path,
+            args.mesh_vertex_scalar,
+            args.mesh_scalar_name,
+        )
         out_prefix = Path(args.out_prefix)
         if args.mesh_path:
             mesh_path = Path(args.mesh_path)
@@ -705,6 +772,12 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Wrote mesh: %s", mesh_path)
 
     # ---- Clusters from mapped pose centers (used for contours, centroid layer, and CSV outputs)
+    log.info(
+        "Clustering step options | cluster_distance_deg=%s | cluster_contour=%s | cluster_contour_color=%s",
+        args.cluster_distance,
+        args.cluster_contour,
+        args.cluster_contour_color,
+    )
     cluster_threshold_rad = np.deg2rad(float(args.cluster_distance))
     raw_cluster_labels = cluster_connected_components(pose_theta, pose_phi, cluster_threshold_rad)
     ordered_idx, cluster_ids, cluster_summaries = reorder_clusters_and_poses(
@@ -744,6 +817,7 @@ def main(argv: list[str] | None = None) -> int:
     trace_labels: list[str] | None = None
 
     if args.pose_layer == "trace":
+        log.info("Trace step options | trace_pose=%s | pose_label=%s | pose_label_top=%s", args.trace_pose, args.pose_label, args.pose_label_top)
         nposes = len(poses)
         if nposes == 0:
             raise SystemExit("No poses available for trace.")
@@ -798,6 +872,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 
+    log.info(
+        "Render step options | map=%s | pose_layer=%s | weight=%s | format=%s | background=%s | cluster_contour=%s",
+        args.map,
+        args.pose_layer,
+        args.weight,
+        args.format,
+        args.background,
+        args.cluster_contour,
+    )
+
     with Timer("Render 2D map", log):
         plot_map(
             pose_theta=pose_theta,
@@ -835,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- CSV outputs
     if args.write_csv:
+        log.info("CSV step options | write_csv=%s", args.write_csv)
         with Timer("Write CSV outputs", log):
             pose_csv = out_prefix.with_name(out_prefix.name + "_poses_mapped.csv")
             with pose_csv.open("w", newline="") as f:
@@ -866,6 +951,7 @@ def main(argv: list[str] | None = None) -> int:
                         "vina_score_max",
                         "vina_score_avg",
                         "vina_score_stddev",
+                        "p_value",
                         "theta_centroid",
                         "phi_centroid",
                     ]
@@ -881,6 +967,7 @@ def main(argv: list[str] | None = None) -> int:
                             _format_csv_cell(row["vina_score_max"]),
                             _format_csv_cell(row["vina_score_avg"]),
                             _format_csv_cell(row["vina_score_stddev"]),
+                            _format_csv_cell(row["p_value"]),
                             _format_csv_cell(row["theta_centroid"]),
                             _format_csv_cell(row["phi_centroid"]),
                         ]
