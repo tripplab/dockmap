@@ -17,6 +17,8 @@ log = get_logger(__name__)
 
 BackgroundCbarLocation = Literal["right", "bottom"]
 BackgroundCbarMode = Literal["norm", "raw"]
+POSE_DENSITY_CMAP = "magma"
+BACKGROUND_CMAP = "viridis"
 
 
 @dataclass(frozen=True)
@@ -384,7 +386,7 @@ def plot_map(
             mesh_phi,
             mesh_scalar,
             mode=background_colorbar_mode,
-            cmap="viridis",
+            cmap=BACKGROUND_CMAP,
             vmin=background_colorbar_vmin,
             vmax=background_colorbar_vmax,
         )
@@ -545,7 +547,17 @@ def plot_map(
         PH = (np.pi / 2) - LAT
         X, Y = project_to_2d(TH, PH, map_name)
 
-        ax.contourf(X, Y, Hs, levels=20, alpha=0.90, zorder=1)
+        density_mappable = ax.contourf(X, Y, Hs, levels=20, cmap=POSE_DENSITY_CMAP, alpha=0.90, zorder=1)
+
+        density_cbar = fig.colorbar(
+            density_mappable,
+            ax=ax,
+            orientation="vertical",
+            location="left",
+            fraction=0.046,
+            pad=0.04,
+        )
+        density_cbar.set_label("Pose density (smoothed cluster size)")
 
     else:
         raise ValueError(f"Unknown pose_layer: {plot_spec.pose_layer}")
