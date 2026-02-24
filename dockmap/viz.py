@@ -283,6 +283,54 @@ def _draw_pose_labels(
         )
 
 
+def _draw_theta_phi_markers(ax, map_name: str) -> None:
+    """Draw sparse theta/phi reference markers for all supported projections."""
+    theta_ticks = np.deg2rad(np.array([-120, -60, 0, 60, 120], float))
+    phi_ticks = np.deg2rad(np.array([30, 60, 90, 120, 150], float))
+
+    # Theta markers (meridians)
+    phi_line = np.linspace(1e-3, np.pi - 1e-3, 220)
+    for theta in theta_ticks:
+        theta_line = np.full_like(phi_line, theta)
+        gx, gy = project_to_2d(theta_line, phi_line, map_name)
+        ax.plot(gx, gy, color="white", linewidth=0.55, alpha=0.16, zorder=1.6)
+
+        lx, ly = project_to_2d(np.array([theta]), np.array([np.pi / 2]), map_name)
+        ax.text(
+            float(lx[0]),
+            float(ly[0]) - 0.06,
+            f"θ={int(np.rad2deg(theta))}°",
+            ha="center",
+            va="top",
+            fontsize=6,
+            color="black",
+            alpha=0.70,
+            zorder=1.8,
+            bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none", alpha=0.55),
+        )
+
+    # Phi markers (parallels)
+    theta_line = np.linspace(-np.pi, np.pi, 300)
+    for phi in phi_ticks:
+        phi_line = np.full_like(theta_line, phi)
+        gx, gy = project_to_2d(theta_line, phi_line, map_name)
+        ax.plot(gx, gy, color="white", linewidth=0.55, alpha=0.16, zorder=1.6)
+
+        lx, ly = project_to_2d(np.array([-np.deg2rad(170.0)]), np.array([phi]), map_name)
+        ax.text(
+            float(lx[0]),
+            float(ly[0]),
+            f"φ={int(np.rad2deg(phi))}°",
+            ha="right",
+            va="center",
+            fontsize=6,
+            color="black",
+            alpha=0.70,
+            zorder=1.8,
+            bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="none", alpha=0.55),
+        )
+
+
 def plot_map(
     pose_theta: np.ndarray,
     pose_phi: np.ndarray,
@@ -321,6 +369,8 @@ def plot_map(
     ax = fig.add_subplot(111)
     ax.set_aspect("equal", adjustable="box")
     ax.set_title(plot_spec.map_title or f"Docking site map ({map_name})")
+
+    _draw_theta_phi_markers(ax, map_name)
 
     # Background
     bg_mappable = None
