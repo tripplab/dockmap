@@ -96,6 +96,31 @@ def _select_pose_indices_for_trace(mode: str, scores: np.ndarray, nposes: int) -
         raise ValueError(f"Invalid --trace-pose value: {mode!r} (use best, first, or integer N)") from e
 
 
+POSE_LAYER_CHOICES = ("scatter", "density", "hexbin", "trace", "centroid")
+POSE_LAYER_ORDER_TOP_TO_BOTTOM = ("centroid", "scatter", "trace", "hexbin", "density")
+
+
+def _normalize_pose_layers(raw_layers: list[str] | None) -> list[str]:
+    """Normalize, validate, deduplicate, and order selected pose layers."""
+    if raw_layers is None or len(raw_layers) == 0:
+        parsed: list[str] = ["density"]
+    else:
+        parsed = []
+        for chunk in raw_layers:
+            parts = [p.strip().lower() for p in str(chunk).split(",")]
+            parsed.extend([p for p in parts if p])
+        if len(parsed) == 0:
+            parsed = ["density"]
+
+    invalid = [p for p in parsed if p not in POSE_LAYER_CHOICES]
+    if invalid:
+        valid_str = ", ".join(POSE_LAYER_CHOICES)
+        raise SystemExit(f"Invalid --pose-layer value(s): {', '.join(invalid)}. Valid values: {valid_str}")
+
+    selected = set(parsed)
+    return [layer for layer in POSE_LAYER_ORDER_TOP_TO_BOTTOM if layer in selected]
+
+
 def _infer_map_title(protein_path: str, peptides_path: str, explicit_title: str | None) -> str:
     """Return CLI title override, or derive one from --protein/--peptides filenames."""
     if explicit_title:
@@ -352,16 +377,22 @@ def _build_parser() -> argparse.ArgumentParser:
     g_adv = ap.add_argument_group("Advanced")
     g_adv.add_argument(
         "--pose-layer",
-        default="density",
-        choices=["scatter", "density", "hexbin", "trace", "centroid"],
+        action="append",
+        default=None,
         help=(
             "How peptide poses are drawn on the 2D map. "
+            "You can pass this flag multiple times (or comma-separate values) to draw multiple layers. "
+            "Layers are composited in fixed top-to-bottom order: centroid, scatter, trace, hexbin, density. "
             "Choices: "
             "'scatter' = plot one marker per pose (best for small N or top-N subsets); "
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
             "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled as 'rank:size' (example: 1:215)."
+            "'centroid' = one marker per cluster centroid, labeled as 'rank:size' (example: 1:215).\n"
+            "Examples:\n"
+            "  --pose-layer density\n"
+            "  --pose-layer centroid --pose-layer scatter\n"
+            "  --pose-layer centroid,scatter,trace"
         ),
     )
     g_adv.add_argument(
@@ -498,6 +529,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     ap = _build_parser()
     args = ap.parse_args(argv)
+    args.pose_layer = _normalize_pose_layers(args.pose_layer)
     configure_logging(args.verbose)
 
     if args.cluster_distance <= 0:
@@ -522,9 +554,9 @@ def main(argv: list[str] | None = None) -> int:
         args.cache_surface,
     )
     log.info(
-        "Projection options | map=%s | pose_layer=%s | pose_projection=%s | peptide_center=%s | seam_rotate=%s | cluster_distance_deg=%s",
+        "Projection options | map=%s | pose_layers=%s | pose_projection=%s | peptide_center=%s | seam_rotate=%s | cluster_distance_deg=%s",
         args.map,
-        args.pose_layer,
+        ",".join(args.pose_layer),
         args.pose_projection,
         args.peptide_center,
         args.seam_rotate,
@@ -807,7 +839,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Pose labels selection (scatter/trace only)
     pose_labels: list[str] | None = None
-    if args.pose_layer in {"scatter", "trace"} and args.pose_label != "none":
+    if ({"scatter", "trace"} & set(args.pose_layer)) and args.pose_label != "none":
         n = len(pose_ids)
         labels = [""] * n
 
@@ -830,7 +862,7 @@ def main(argv: list[str] | None = None) -> int:
     trace_lines: list[tuple[np.ndarray, np.ndarray]] | None = None
     trace_labels: list[str] | None = None
 
-    if args.pose_layer == "trace":
+    if "trace" in args.pose_layer:
         log.info("Trace step options | trace_pose=%s | pose_label=%s | pose_label_top=%s", args.trace_pose, args.pose_label, args.pose_label_top)
         nposes = len(poses)
         if nposes == 0:
@@ -873,7 +905,7 @@ def main(argv: list[str] | None = None) -> int:
     ps = PlotSpec(
         map_name=args.map,
         map_title=_infer_map_title(args.protein, args.peptides, args.map_title),
-        pose_layer=args.pose_layer,
+        pose_layers=tuple(args.pose_layer),
         weight_mode=args.weight,
         out_format=args.format,
         background=args.background,
@@ -888,9 +920,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
     log.info(
-        "Render step options | map=%s | pose_layer=%s | weight=%s | format=%s | background=%s | cluster_contour=%s",
+        "Render step options | map=%s | pose_layers=%s | weight=%s | format=%s | background=%s | cluster_contour=%s",
         args.map,
-        args.pose_layer,
+        ",".join(args.pose_layer),
         args.weight,
         args.format,
         args.background,

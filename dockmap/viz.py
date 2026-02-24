@@ -25,7 +25,7 @@ BACKGROUND_CMAP = "viridis"
 class PlotSpec:
     map_name: str = "mollweide"
     map_title: str | None = None
-    pose_layer: str = "scatter"   # scatter|density|hexbin|trace|centroid
+    pose_layers: tuple[str, ...] = ("scatter",)   # top->bottom subset of scatter|density|hexbin|trace|centroid
     weight_mode: str = "exp"      # none|exp|linear
     background: str = "none"      # none|curvature|radial
     out_format: str = "png"
@@ -435,132 +435,132 @@ def plot_map(
             _draw_cluster_kde_contour(ax, x_pose[idx], y_pose[idx], ccolors[cid], cluster_contour)
 
     # ---- Pose layers
-    if plot_spec.pose_layer == "scatter":
-        x, y = project_to_2d(lon, pose_phi, map_name)
-        ax.scatter(x, y, s=10, alpha=0.75, zorder=2)
+    for layer in plot_spec.pose_layers:
+        if layer == "scatter":
+            x, y = project_to_2d(lon, pose_phi, map_name)
+            ax.scatter(x, y, s=10, alpha=0.75, zorder=2)
 
-        # Halo ring
-        ax.scatter(
-            x, y,
-            s=180, marker="o",
-            facecolors="none",
-            edgecolors="white",
-            linewidths=2.0,
-            zorder=6,
-        )
-        # Inner dot
-        ax.scatter(
-            x, y,
-            s=40, marker="o",
-            edgecolors="black",
-            linewidths=0.8,
-            zorder=7,
-        )
-
-        _draw_pose_labels(ax, x, y, pose_labels, dy=0.03, fontsize=7, zorder=8)
-
-    elif plot_spec.pose_layer == "trace":
-        if trace_lines is None or len(trace_lines) == 0:
-            raise ValueError("pose_layer=trace but trace_lines not provided.")
-
-        # If trace_labels not provided, just don't label traces
-        if trace_labels is None:
-            trace_labels = [""] * len(trace_lines)
-
-        for i, (tth, tph) in enumerate(trace_lines):
-            if tth is None or tph is None or len(tth) == 0:
-                continue
-
-            tx, ty = project_to_2d(tth, tph, map_name)
-
-            # Polyline (N->C)
-            ax.plot(tx, ty, linewidth=1.6, alpha=0.95, zorder=3)
-
-            # CA markers: halo + inner dot
+            # Halo ring
             ax.scatter(
-                tx, ty,
-                s=140, marker="o",
+                x, y,
+                s=180, marker="o",
                 facecolors="none",
                 edgecolors="white",
                 linewidths=2.0,
-                zorder=4,
+                zorder=6,
             )
+            # Inner dot
             ax.scatter(
-                tx, ty,
-                s=34, marker="o",
+                x, y,
+                s=40, marker="o",
                 edgecolors="black",
-                linewidths=0.9,
-                zorder=5,
+                linewidths=0.8,
+                zorder=7,
             )
 
-            # Label each trace (above first CA)
-            lab = trace_labels[i] if i < len(trace_labels) else ""
-            if lab:
-                _draw_pose_labels(
-                    ax,
-                    np.array([tx[0]]),
-                    np.array([ty[0]]),
-                    [lab],
-                    dy=0.03,
-                    fontsize=8,
-                    zorder=8,
+            _draw_pose_labels(ax, x, y, pose_labels, dy=0.03, fontsize=7, zorder=8)
+
+        elif layer == "trace":
+            if trace_lines is None or len(trace_lines) == 0:
+                raise ValueError("pose_layer includes trace but trace_lines not provided.")
+
+            # If trace_labels not provided, just don't label traces
+            layer_trace_labels = trace_labels if trace_labels is not None else [""] * len(trace_lines)
+
+            for i, (tth, tph) in enumerate(trace_lines):
+                if tth is None or tph is None or len(tth) == 0:
+                    continue
+
+                tx, ty = project_to_2d(tth, tph, map_name)
+
+                # Polyline (N->C)
+                ax.plot(tx, ty, linewidth=1.6, alpha=0.95, zorder=3)
+
+                # CA markers: halo + inner dot
+                ax.scatter(
+                    tx, ty,
+                    s=140, marker="o",
+                    facecolors="none",
+                    edgecolors="white",
+                    linewidths=2.0,
+                    zorder=4,
+                )
+                ax.scatter(
+                    tx, ty,
+                    s=34, marker="o",
+                    edgecolors="black",
+                    linewidths=0.9,
+                    zorder=5,
                 )
 
-    elif plot_spec.pose_layer == "centroid":
-        if cluster_theta is None or cluster_phi is None:
-            raise ValueError("pose_layer=centroid but cluster_theta/cluster_phi not provided.")
-        x, y = project_to_2d(cluster_theta, cluster_phi, map_name)
+                # Label each trace (above first CA)
+                lab = layer_trace_labels[i] if i < len(layer_trace_labels) else ""
+                if lab:
+                    _draw_pose_labels(
+                        ax,
+                        np.array([tx[0]]),
+                        np.array([ty[0]]),
+                        [lab],
+                        dy=0.03,
+                        fontsize=8,
+                        zorder=8,
+                    )
 
-        ax.scatter(
-            x, y,
-            s=180, marker="o",
-            facecolors="none",
-            edgecolors="white",
-            linewidths=2.0,
-            zorder=6,
-        )
-        ax.scatter(
-            x, y,
-            s=40, marker="o",
-            edgecolors="black",
-            linewidths=0.8,
-            zorder=7,
-        )
-        cluster_size_by_id = {int(cid): int(np.sum(cluster_ids == cid)) for cid in np.unique(cluster_ids)} if cluster_ids is not None else {}
-        centroid_labels = [f"{i + 1}:{cluster_size_by_id.get(i + 1, 0)}" for i in range(len(x))]
-        _draw_pose_labels(ax, x, y, centroid_labels, dy=0.03, fontsize=8, zorder=8)
+        elif layer == "centroid":
+            if cluster_theta is None or cluster_phi is None:
+                raise ValueError("pose_layer includes centroid but cluster_theta/cluster_phi not provided.")
+            x, y = project_to_2d(cluster_theta, cluster_phi, map_name)
 
-    elif plot_spec.pose_layer == "hexbin":
-        x, y = project_to_2d(lon, pose_phi, map_name)
-        ax.hexbin(x, y, gridsize=70, mincnt=1, zorder=2)
+            ax.scatter(
+                x, y,
+                s=180, marker="o",
+                facecolors="none",
+                edgecolors="white",
+                linewidths=2.0,
+                zorder=6,
+            )
+            ax.scatter(
+                x, y,
+                s=40, marker="o",
+                edgecolors="black",
+                linewidths=0.8,
+                zorder=7,
+            )
+            cluster_size_by_id = {int(cid): int(np.sum(cluster_ids == cid)) for cid in np.unique(cluster_ids)} if cluster_ids is not None else {}
+            centroid_labels = [f"{i + 1}:{cluster_size_by_id.get(i + 1, 0)}" for i in range(len(x))]
+            _draw_pose_labels(ax, x, y, centroid_labels, dy=0.03, fontsize=8, zorder=8)
 
-    elif plot_spec.pose_layer == "density":
-        lon_edges = np.linspace(-np.pi, np.pi, 360 + 1)
-        lat_edges = np.linspace(-np.pi / 2, np.pi / 2, 180 + 1)
-        H, _, _ = np.histogram2d(lat_w, lon_w, bins=[lat_edges, lon_edges], weights=w_w)
-        Hs = _gaussian_blur_fft(H, sigma_px=2.0)
+        elif layer == "hexbin":
+            x, y = project_to_2d(lon, pose_phi, map_name)
+            ax.hexbin(x, y, gridsize=70, mincnt=1, zorder=2)
 
-        lon_cent = 0.5 * (lon_edges[:-1] + lon_edges[1:])
-        lat_cent = 0.5 * (lat_edges[:-1] + lat_edges[1:])
-        LON, LAT = np.meshgrid(lon_cent, lat_cent)
-        TH = LON
-        PH = (np.pi / 2) - LAT
-        X, Y = project_to_2d(TH, PH, map_name)
+        elif layer == "density":
+            lon_edges = np.linspace(-np.pi, np.pi, 360 + 1)
+            lat_edges = np.linspace(-np.pi / 2, np.pi / 2, 180 + 1)
+            H, _, _ = np.histogram2d(lat_w, lon_w, bins=[lat_edges, lon_edges], weights=w_w)
+            Hs = _gaussian_blur_fft(H, sigma_px=2.0)
 
-        density_mappable = ax.contourf(X, Y, Hs, levels=20, cmap=POSE_DENSITY_CMAP, alpha=0.90, zorder=1)
+            lon_cent = 0.5 * (lon_edges[:-1] + lon_edges[1:])
+            lat_cent = 0.5 * (lat_edges[:-1] + lat_edges[1:])
+            LON, LAT = np.meshgrid(lon_cent, lat_cent)
+            TH = LON
+            PH = (np.pi / 2) - LAT
+            X, Y = project_to_2d(TH, PH, map_name)
 
-        density_cbar = fig.colorbar(
-            density_mappable,
-            ax=ax,
-            orientation="vertical",
-            location="left",
-            fraction=0.046,
-            pad=0.04,
-        )
-        density_cbar.set_label("Pose density (smoothed cluster size)")
+            density_mappable = ax.contourf(X, Y, Hs, levels=20, cmap=POSE_DENSITY_CMAP, alpha=0.90, zorder=1)
 
-    else:
-        raise ValueError(f"Unknown pose_layer: {plot_spec.pose_layer}")
+            density_cbar = fig.colorbar(
+                density_mappable,
+                ax=ax,
+                orientation="vertical",
+                location="left",
+                fraction=0.046,
+                pad=0.04,
+            )
+            density_cbar.set_label("Pose density (smoothed cluster size)")
+
+        else:
+            raise ValueError(f"Unknown pose_layer: {layer}")
 
     # ---- PPI overlays
     # 1) Atom-cloud contour footprint
