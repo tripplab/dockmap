@@ -8,6 +8,18 @@ with no external surface tools and no `scikit-image` requirement.
 
 ---
 
+## Methodology infographic
+
+A compact workflow overview (input → transformations → output) can be generated locally:
+
+```bash
+python docs/generate_methodology_infographic.py
+```
+
+This command writes `docs/dockmap_methodology_infographic.png` in your working tree.
+
+---
+
 ## What it does
 
 Given:
