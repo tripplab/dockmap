@@ -388,7 +388,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
             "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\ncluster_avg_vina' (example: 1:215\n-8.342).\n"
+            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\n<cluster_avg_vina>' (example: 1:215\n<-8.34>).\n"
             "Examples:\n"
             "  --pose-layer density\n"
             "  --pose-layer centroid --pose-layer scatter\n"
@@ -441,8 +441,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=2.0,
         help=(
             "Gaussian smoothing width (in density-grid pixels) for --pose-layer density. "
-            "Smaller values make the density tighter/sharper around cluster members; "
-            "larger values make broader/smoother density blobs."
+            "Smaller values make broader/smoother density blobs; "
+            "larger values make the density tighter/sharper around cluster members."
         ),
     )
     g_adv.add_argument(

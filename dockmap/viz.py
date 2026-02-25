@@ -556,7 +556,7 @@ def plot_map(
                 if cluster_p_values is not None and i < len(cluster_p_values):
                     p_value = float(cluster_p_values[i])
 
-                avg_vina_txt = f"{avg_vina:.3f}" if np.isfinite(avg_vina) else "nan"
+                avg_vina_txt = f"<{avg_vina:.2f}>" if np.isfinite(avg_vina) else "<nan>"
                 centroid_labels.append(f"{rank}:{cluster_size}\n{avg_vina_txt}")
 
                 if np.isfinite(best_avg_vina) and np.isfinite(avg_vina) and np.isclose(avg_vina, best_avg_vina):
