@@ -152,6 +152,7 @@ dockmap \
   --map mollweide \
   --pose-layer density \
   --weight exp \
+  --pose-density-sigma 1.2 \
   --background curvature --background-smooth 5 \
   --export-mesh --mesh-format ply --mesh-vertex-scalar density \
   --out-prefix docking_map
@@ -188,6 +189,19 @@ Pose clustering uses **spherical angular distance** on `(theta, phi)` (great-cir
 `theta` and `phi` are written in **radians** in CSV outputs.
 
 Use `--cluster-distance` in **degrees** to set the clustering threshold (default: `15`).
+
+### Pose density width (for `--pose-layer density`)
+
+Use `--pose-density-sigma` to control how wide/smooth the density blobs are.
+
+- Lower values (for example `0.8`–`1.2`) make density tighter around cluster members.
+- Higher values (for example `2.5`–`4.0`) make broader, more diffuse blobs.
+
+Example (tighter density):
+
+```bash
+dockmap ... --pose-layer density --pose-density-sigma 1.0
+```
 
 ### Raycast projection
 

@@ -436,6 +436,16 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     g_adv.add_argument(
+        "--pose-density-sigma",
+        type=float,
+        default=2.0,
+        help=(
+            "Gaussian smoothing width (in density-grid pixels) for --pose-layer density. "
+            "Smaller values make the density tighter/sharper around cluster members; "
+            "larger values make broader/smoother density blobs."
+        ),
+    )
+    g_adv.add_argument(
         "--background",
         default="none",
         choices=["none", "curvature", "radial"],
@@ -534,6 +544,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cluster_distance <= 0:
         raise SystemExit("--cluster-distance must be > 0 degrees.")
+    if args.pose_density_sigma <= 0:
+        raise SystemExit("--pose-density-sigma must be > 0.")
 
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
@@ -911,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
         weight_mode=args.weight,
         out_format=args.format,
         background=args.background,
+        pose_density_sigma=args.pose_density_sigma,
     )
 
 
@@ -922,10 +935,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
     log.info(
-        "Render step options | map=%s | pose_layers=%s | weight=%s | format=%s | background=%s | cluster_contour=%s",
+        "Render step options | map=%s | pose_layers=%s | weight=%s | pose_density_sigma=%s | format=%s | background=%s | cluster_contour=%s",
         args.map,
         ",".join(args.pose_layer),
         args.weight,
+        args.pose_density_sigma,
         args.format,
         args.background,
         args.cluster_contour,

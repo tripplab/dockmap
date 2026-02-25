@@ -28,6 +28,7 @@ class PlotSpec:
     pose_layers: tuple[str, ...] = ("scatter",)   # top->bottom subset of scatter|density|hexbin|trace|centroid
     weight_mode: str = "exp"      # none|exp|linear
     background: str = "none"      # none|curvature|radial
+    pose_density_sigma: float = 2.0
     out_format: str = "png"
     dpi: int = 300
 
@@ -585,7 +586,7 @@ def plot_map(
             lon_edges = np.linspace(-np.pi, np.pi, 360 + 1)
             lat_edges = np.linspace(-np.pi / 2, np.pi / 2, 180 + 1)
             H, _, _ = np.histogram2d(lat_w, lon_w, bins=[lat_edges, lon_edges], weights=w_w)
-            Hs = _gaussian_blur_fft(H, sigma_px=2.0)
+            Hs = _gaussian_blur_fft(H, sigma_px=max(float(plot_spec.pose_density_sigma), 1e-6))
 
             lon_cent = 0.5 * (lon_edges[:-1] + lon_edges[1:])
             lat_cent = 0.5 * (lat_edges[:-1] + lat_edges[1:])
