@@ -837,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
     cluster_theta = np.array([float(row["theta_centroid"]) for row in cluster_summaries], dtype=float)
     cluster_phi = np.array([float(row["phi_centroid"]) for row in cluster_summaries], dtype=float)
     cluster_avg_vina_scores = np.array([float(row["vina_score_avg"]) for row in cluster_summaries], dtype=float)
+    cluster_p_values = np.array([float(row["p_value"]) for row in cluster_summaries], dtype=float)
 
     # ---- Pose labels selection (scatter/trace only)
     pose_labels: list[str] | None = None
@@ -953,6 +954,7 @@ def main(argv: list[str] | None = None) -> int:
             cluster_theta=cluster_theta,
             cluster_phi=cluster_phi,
             cluster_avg_vina_scores=cluster_avg_vina_scores,
+            cluster_p_values=cluster_p_values,
             cluster_contour=args.cluster_contour,
             cluster_contour_color=args.cluster_contour_color,
             background_colorbar=args.background_colorbar,
