@@ -388,7 +388,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
             "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled as 'rank:size' (example: 1:215).\n"
+            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\ncluster_avg_vina' (example: 1:215\n-8.342).\n"
             "Examples:\n"
             "  --pose-layer density\n"
             "  --pose-layer centroid --pose-layer scatter\n"
@@ -836,6 +836,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cluster_theta = np.array([float(row["theta_centroid"]) for row in cluster_summaries], dtype=float)
     cluster_phi = np.array([float(row["phi_centroid"]) for row in cluster_summaries], dtype=float)
+    cluster_avg_vina_scores = np.array([float(row["vina_score_avg"]) for row in cluster_summaries], dtype=float)
 
     # ---- Pose labels selection (scatter/trace only)
     pose_labels: list[str] | None = None
@@ -951,6 +952,7 @@ def main(argv: list[str] | None = None) -> int:
             cluster_ids=cluster_ids,
             cluster_theta=cluster_theta,
             cluster_phi=cluster_phi,
+            cluster_avg_vina_scores=cluster_avg_vina_scores,
             cluster_contour=args.cluster_contour,
             cluster_contour_color=args.cluster_contour_color,
             background_colorbar=args.background_colorbar,

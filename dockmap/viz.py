@@ -353,6 +353,7 @@ def plot_map(
     cluster_ids: np.ndarray | None = None,
     cluster_theta: np.ndarray | None = None,
     cluster_phi: np.ndarray | None = None,
+    cluster_avg_vina_scores: np.ndarray | None = None,
     cluster_contour: str = "none",
     cluster_contour_color: str | None = None,
     background_colorbar: bool = False,
@@ -527,7 +528,15 @@ def plot_map(
                 zorder=7,
             )
             cluster_size_by_id = {int(cid): int(np.sum(cluster_ids == cid)) for cid in np.unique(cluster_ids)} if cluster_ids is not None else {}
-            centroid_labels = [f"{i + 1}:{cluster_size_by_id.get(i + 1, 0)}" for i in range(len(x))]
+            centroid_labels = []
+            for i in range(len(x)):
+                rank = i + 1
+                cluster_size = cluster_size_by_id.get(rank, 0)
+                avg_vina = np.nan
+                if cluster_avg_vina_scores is not None and i < len(cluster_avg_vina_scores):
+                    avg_vina = float(cluster_avg_vina_scores[i])
+                avg_vina_txt = f"{avg_vina:.3f}" if np.isfinite(avg_vina) else "nan"
+                centroid_labels.append(f"{rank}:{cluster_size}\n{avg_vina_txt}")
             _draw_pose_labels(ax, x, y, centroid_labels, dy=0.03, fontsize=8, zorder=8)
 
         elif layer == "hexbin":
