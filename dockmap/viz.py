@@ -261,6 +261,9 @@ def _draw_pose_labels(
     dy: float = 0.015,
     fontsize: int = 7,
     zorder: int = 6,
+    edgecolors: list[str] | None = None,
+    facecolor: str = "white",
+    linewidth: float = 0.0,
 ):
     """
     Draw labels above pose markers (scatter/trace only).
@@ -273,6 +276,9 @@ def _draw_pose_labels(
         lab = labels[i]
         if not lab:
             continue
+        edgecolor = "none"
+        if edgecolors is not None and i < len(edgecolors):
+            edgecolor = edgecolors[i]
         ax.text(
             float(x[i]),
             float(y[i] + dy),
@@ -281,7 +287,7 @@ def _draw_pose_labels(
             va="bottom",
             fontsize=fontsize,
             zorder=zorder,
-            bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.70),
+            bbox=dict(boxstyle="square,pad=0.15", fc=facecolor, ec=edgecolor, lw=linewidth, alpha=0.70),
         )
 
 
@@ -354,6 +360,7 @@ def plot_map(
     cluster_theta: np.ndarray | None = None,
     cluster_phi: np.ndarray | None = None,
     cluster_avg_vina_scores: np.ndarray | None = None,
+    cluster_p_values: np.ndarray | None = None,
     cluster_contour: str = "none",
     cluster_contour_color: str | None = None,
     background_colorbar: bool = False,
@@ -529,15 +536,46 @@ def plot_map(
             )
             cluster_size_by_id = {int(cid): int(np.sum(cluster_ids == cid)) for cid in np.unique(cluster_ids)} if cluster_ids is not None else {}
             centroid_labels = []
+            centroid_outline_colors: list[str] = []
+
+            best_avg_vina = np.nan
+            if cluster_avg_vina_scores is not None and len(cluster_avg_vina_scores) > 0:
+                finite_scores = cluster_avg_vina_scores[np.isfinite(cluster_avg_vina_scores)]
+                if finite_scores.size > 0:
+                    best_avg_vina = float(np.min(finite_scores))
+
             for i in range(len(x)):
                 rank = i + 1
                 cluster_size = cluster_size_by_id.get(rank, 0)
                 avg_vina = np.nan
                 if cluster_avg_vina_scores is not None and i < len(cluster_avg_vina_scores):
                     avg_vina = float(cluster_avg_vina_scores[i])
+
+                p_value = np.nan
+                if cluster_p_values is not None and i < len(cluster_p_values):
+                    p_value = float(cluster_p_values[i])
+
                 avg_vina_txt = f"{avg_vina:.3f}" if np.isfinite(avg_vina) else "nan"
                 centroid_labels.append(f"{rank}:{cluster_size}\n{avg_vina_txt}")
-            _draw_pose_labels(ax, x, y, centroid_labels, dy=0.03, fontsize=8, zorder=8)
+
+                if np.isfinite(best_avg_vina) and np.isfinite(avg_vina) and np.isclose(avg_vina, best_avg_vina):
+                    centroid_outline_colors.append("red")
+                elif np.isfinite(p_value) and p_value < 0.05:
+                    centroid_outline_colors.append("lime")
+                else:
+                    centroid_outline_colors.append("white")
+
+            _draw_pose_labels(
+                ax,
+                x,
+                y,
+                centroid_labels,
+                dy=0.03,
+                fontsize=8,
+                zorder=8,
+                edgecolors=centroid_outline_colors,
+                linewidth=0.8,
+            )
 
         elif layer == "hexbin":
             x, y = project_to_2d(lon, pose_phi, map_name)
