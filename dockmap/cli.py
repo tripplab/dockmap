@@ -7,6 +7,8 @@ import numbers
 from pathlib import Path
 import numpy as np
 import csv
+import json
+from dataclasses import dataclass
 
 from .util import (
     configure_logging,
@@ -28,6 +30,7 @@ from .io import (
     protein_residue_inventory,
     validate_ppi_residues_exist,
     AtomRecord,
+    Pose,
 )
 from .surface import build_quicksurf_mesh, QuickSurfSpec, sample_field_trilinear
 from .project import project_point_to_surface_nearest, project_point_to_surface_raycast
@@ -35,8 +38,114 @@ from .mapproj import surface_point_to_spherical_uv, auto_seam_rotation, apply_se
 from .ppi import ppi_residue_points_uv, ppi_atom_cloud_uv
 from .clustering import cluster_connected_components, reorder_clusters_and_poses
 from .viz import plot_map, PlotSpec
+from . import __version__
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class DockSet:
+    set_id: str
+    protein_path: str
+    peptides_path: str
+    scores_path: str
+    protein_atoms: list[AtomRecord]
+    poses: list
+
+
+def _set_usage_error(value: str) -> str:
+    return (
+        f"Invalid --set value: {value!r}. "
+        "Expected format: set_id:target.pdb:poses.pdb:scores.txt"
+    )
+
+
+def _parse_set_arg(value: str) -> tuple[str, str, str, str]:
+    # Split from the right to tolerate ':' in set_id.
+    parts = value.rsplit(":", 3)
+    if len(parts) != 4:
+        raise ValueError(_set_usage_error(value))
+    set_id, protein, peptides, scores = [p.strip() for p in parts]
+    if not set_id or not protein or not peptides or not scores:
+        raise ValueError(_set_usage_error(value))
+    return set_id, protein, peptides, scores
+
+
+def _extract_target_ca_by_residue(atoms: list[AtomRecord]) -> dict[tuple[str, int, str], AtomRecord]:
+    out: dict[tuple[str, int, str], AtomRecord] = {}
+    for a in atoms:
+        if a.name.strip().upper() != "CA":
+            continue
+        key = (a.chain, int(a.resseq), a.icode or "")
+        if key not in out:
+            out[key] = a
+    return out
+
+
+def _kabsch_rigid_transform(mobile: np.ndarray, reference: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return R, t so that mobile @ R + t best matches reference."""
+    if mobile.shape != reference.shape or mobile.ndim != 2 or mobile.shape[1] != 3:
+        raise ValueError("Alignment requires Nx3 paired coordinates.")
+    cm = mobile.mean(axis=0)
+    cr = reference.mean(axis=0)
+    xm = mobile - cm
+    xr = reference - cr
+    h = xm.T @ xr
+    u, _, vt = np.linalg.svd(h)
+    r = vt.T @ u.T
+    if np.linalg.det(r) < 0:
+        vt[-1, :] *= -1
+        r = vt.T @ u.T
+    t = cr - (cm @ r)
+    return r, t
+
+
+def _rmsd(a: np.ndarray, b: np.ndarray) -> float:
+    d2 = np.sum((a - b) ** 2, axis=1)
+    return float(np.sqrt(np.mean(d2))) if d2.size else float("nan")
+
+
+def _transform_atoms(atoms: list[AtomRecord], r: np.ndarray, t: np.ndarray) -> list[AtomRecord]:
+    out: list[AtomRecord] = []
+    for a in atoms:
+        c = a.coord @ r + t
+        out.append(
+            AtomRecord(
+                chain=a.chain,
+                resname=a.resname,
+                resseq=a.resseq,
+                icode=a.icode,
+                name=a.name,
+                element=a.element,
+                coord=np.array(c, dtype=float),
+            )
+        )
+    return out
+
+
+def _load_dock_sets(raw_sets: list[str]) -> list[DockSet]:
+    sets: list[DockSet] = []
+    seen: set[str] = set()
+    for raw in raw_sets:
+        sid, protein, peptides, scores = _parse_set_arg(raw)
+        if sid in seen:
+            raise SystemExit(f"Duplicate set_id in --set inputs: {sid!r}")
+        seen.add(sid)
+        protein_atoms = load_protein_atoms(protein)
+        poses = load_poses(peptides, scores)
+        if len(poses) == 0:
+            raise SystemExit(f"No peptide poses loaded for set {sid!r}.")
+        sets.append(
+            DockSet(
+                set_id=sid,
+                protein_path=protein,
+                peptides_path=peptides,
+                scores_path=scores,
+                protein_atoms=protein_atoms,
+                poses=poses,
+            )
+        )
+    return sets
 
 
 def _format_csv_cell(value: object) -> object:
@@ -121,13 +230,11 @@ def _normalize_pose_layers(raw_layers: list[str] | None) -> list[str]:
     return [layer for layer in POSE_LAYER_ORDER_TOP_TO_BOTTOM if layer in selected]
 
 
-def _infer_map_title(protein_path: str, peptides_path: str, explicit_title: str | None) -> str:
-    """Return CLI title override, or derive one from --protein/--peptides filenames."""
+def _infer_map_title(reference_set_id: str, explicit_title: str | None) -> str:
+    """Return CLI title override, or derive one from the reference set id."""
     if explicit_title:
         return explicit_title
-    protein_name = Path(protein_path).stem
-    peptides_name = Path(peptides_path).stem
-    return f"{protein_name} vs {peptides_name}"
+    return f"dockmap multi-set (ref={reference_set_id})"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -137,7 +244,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=_HelpFormatter,
         epilog=(
             "Examples:\n"
-            "  dockmap --protein prot.pdb --peptides poses.pdb --scores scores.txt --ppi-file ppi.txt\n"
+            "  dockmap --set s1:prot.pdb:poses.pdb:scores.txt --ppi-file ppi.txt\n"
             "  dockmap ... --map hammer --pose-layer centroid --cluster-contour outline\n"
             "  dockmap ... --cluster-contour filled --cluster-contour-color black"
         ),
@@ -147,16 +254,16 @@ def _build_parser() -> argparse.ArgumentParser:
     # Inputs
     # -----------------------
     g_in = ap.add_argument_group("Inputs")
-    g_in.add_argument("--protein", required=True, help="Protein coordinates PDB (ATOM/HETATM).")
     g_in.add_argument(
-        "--peptides",
-        required=True,
-        help="Peptide poses PDB. Multiple poses separated by END / ENDMDL / MODEL blocks.",
-    )
-    g_in.add_argument(
-        "--scores",
-        required=True,
-        help="Scores text file: one value per pose, in the same order as poses in --peptides.",
+        "--set",
+        dest="sets",
+        action="append",
+        default=None,
+        help=(
+            "Docking set descriptor (repeatable): "
+            "set_id:target.pdb:poses.pdb:scores.txt. "
+            "Example: --set s1:target1.pdb:poses1.pdb:scores1.txt --set s2:target2.pdb:poses2.pdb:scores2.txt"
+        ),
     )
     g_in.add_argument(
         "--ppi-file",
@@ -165,9 +272,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     g_in.add_argument(
         "--align-protein",
-        default="none",
-        choices=["none"],
-        help="Protein alignment mode. Currently only 'none' (no alignment).",
+        default="ca_rigid",
+        choices=["ca_rigid"],
+        help="Protein alignment mode. 'ca_rigid' = C-alpha rigid alignment to reference set.",
+    )
+    g_in.add_argument(
+        "--reference-set",
+        default=None,
+        help="Reference set_id for protein alignment. Default: first provided --set.",
+    )
+    g_in.add_argument(
+        "--no-align",
+        action="store_true",
+        help="Disable default alignment step and use raw coordinates as-is.",
     )
 
     # -----------------------
@@ -550,13 +667,10 @@ def main(argv: list[str] | None = None) -> int:
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
 
-    log.info(
-        "Input options | protein=%s | peptides=%s | scores=%s | ppi_file=%s",
-        args.protein,
-        args.peptides,
-        args.scores,
-        args.ppi_file,
-    )
+    if not args.sets:
+        raise SystemExit("At least one --set is required.")
+
+    log.info("Input options | n_sets=%d | ppi_file=%s", len(args.sets), args.ppi_file)
     log.info(
         "Surface options | radius_scale=%s | density_isovalue=%s | grid_spacing=%s | surface_quality=%s | cache_surface=%s",
         args.radius_scale,
@@ -591,15 +705,120 @@ def main(argv: list[str] | None = None) -> int:
         args.mesh_path,
     )
 
-    # ---- Load inputs
-    with Timer("Load protein atoms", log):
-        protein_atoms = load_protein_atoms(args.protein)
+    # ---- Load multi-set inputs
+    with Timer("Load all docking sets", log):
+        dock_sets = _load_dock_sets(args.sets)
+    total_poses = sum(len(s.poses) for s in dock_sets)
+    log.info("Loaded %d sets | total poses=%d", len(dock_sets), total_poses)
 
-    with Timer("Load peptide poses + scores", log):
-        poses = load_poses(args.peptides, args.scores)
-    if len(poses) == 0:
-        raise SystemExit("No peptide poses loaded.")
-    log.info("Loaded %d peptide poses", len(poses))
+    reference_set_id = args.reference_set or dock_sets[0].set_id
+    set_by_id = {s.set_id: s for s in dock_sets}
+    if reference_set_id not in set_by_id:
+        raise SystemExit(f"--reference-set {reference_set_id!r} not found in provided --set values.")
+    reference_set = set_by_id[reference_set_id]
+    protein_atoms = reference_set.protein_atoms
+
+    # ---- Optional target alignment (default on, but skipped for single-set or --no-align)
+    aligned_sets: list[DockSet] = []
+    alignment_rows: list[dict[str, object]] = []
+    perform_alignment = (not args.no_align) and (len(dock_sets) > 1)
+    ref_ca: dict[tuple[str, int, str], AtomRecord] = {}
+    if perform_alignment:
+        ref_ca = _extract_target_ca_by_residue(reference_set.protein_atoms)
+        if not ref_ca:
+            raise SystemExit(f"Reference set {reference_set_id!r} has no C-alpha atoms.")
+
+    for ds in dock_sets:
+        if (not perform_alignment) or ds.set_id == reference_set_id:
+            aligned_sets.append(ds)
+            alignment_rows.append(
+                {
+                    "set_id": ds.set_id,
+                    "reference_set_id": reference_set_id,
+                    "n_ca_matched": len(ref_ca) if perform_alignment else 0,
+                    "rmsd_before": 0.0,
+                    "rmsd_after": 0.0,
+                    "ligand_displacement_min": 0.0,
+                    "ligand_displacement_max": 0.0,
+                    "ligand_displacement_mean": 0.0,
+                    "ligand_displacement_std": 0.0,
+                    "alignment_enabled": perform_alignment,
+                }
+            )
+            continue
+
+        mov_ca = _extract_target_ca_by_residue(ds.protein_atoms)
+        if set(ref_ca.keys()) != set(mov_ca.keys()):
+            only_ref = sorted(set(ref_ca.keys()) - set(mov_ca.keys()))[:8]
+            only_mov = sorted(set(mov_ca.keys()) - set(ref_ca.keys()))[:8]
+            raise SystemExit(
+                f"Set {ds.set_id!r} failed sequence/C-alpha sanity check vs reference {reference_set_id!r}. "
+                f"Only in reference (sample): {only_ref}; only in set (sample): {only_mov}"
+            )
+
+        keys = sorted(ref_ca.keys(), key=lambda k: (k[0], k[1], k[2]))
+        ref_xyz = np.array([ref_ca[k].coord for k in keys], dtype=float)
+        mov_xyz = np.array([mov_ca[k].coord for k in keys], dtype=float)
+        rmsd_before = _rmsd(mov_xyz, ref_xyz)
+        r, t = _kabsch_rigid_transform(mov_xyz, ref_xyz)
+        mov_aligned_xyz = mov_xyz @ r + t
+        rmsd_after = _rmsd(mov_aligned_xyz, ref_xyz)
+        if not np.isfinite(rmsd_after):
+            raise SystemExit(f"Alignment failed numerically for set {ds.set_id!r}.")
+
+        aligned_protein = _transform_atoms(ds.protein_atoms, r, t)
+        aligned_poses = []
+        pose_displacements = []
+        for pose in ds.poses:
+            before_coords = coords_from_atoms(pose.peptide_atoms)
+            before_center = before_coords.mean(axis=0)
+            pa = _transform_atoms(pose.peptide_atoms, r, t)
+            after_coords = coords_from_atoms(pa)
+            after_center = after_coords.mean(axis=0)
+            pose_displacements.append(float(np.linalg.norm(after_center - before_center)))
+            aligned_poses.append(Pose(pose_id=pose.pose_id, peptide_atoms=pa, vina_score=pose.vina_score))
+
+        pd = np.array(pose_displacements, dtype=float)
+        aligned_sets.append(
+            DockSet(
+                set_id=ds.set_id,
+                protein_path=ds.protein_path,
+                peptides_path=ds.peptides_path,
+                scores_path=ds.scores_path,
+                protein_atoms=aligned_protein,
+                poses=aligned_poses,
+            )
+        )
+        alignment_rows.append(
+            {
+                "set_id": ds.set_id,
+                "reference_set_id": reference_set_id,
+                "n_ca_matched": int(len(keys)),
+                "rmsd_before": float(rmsd_before),
+                "rmsd_after": float(rmsd_after),
+                "ligand_displacement_min": float(np.min(pd)) if pd.size else 0.0,
+                "ligand_displacement_max": float(np.max(pd)) if pd.size else 0.0,
+                "ligand_displacement_mean": float(np.mean(pd)) if pd.size else 0.0,
+                "ligand_displacement_std": float(np.std(pd)) if pd.size else 0.0,
+                "alignment_enabled": True,
+            }
+        )
+
+    # keep plotting frame as reference set (aligned if requested)
+    aligned_ref = next(s for s in aligned_sets if s.set_id == reference_set_id)
+    protein_atoms = aligned_ref.protein_atoms
+    poses = [p for s in aligned_sets for p in s.poses]
+    pose_set_ids = [s.set_id for s in aligned_sets for _ in s.poses]
+    log.info("Alignment summary (reference=%s, enabled=%s):", reference_set_id, perform_alignment)
+    for row in alignment_rows:
+        log.info(
+            "  set=%s | n_ca=%s | rmsd_before=%.3f | rmsd_after=%.3f | lig_disp_mean=%.3f",
+            row["set_id"],
+            row["n_ca_matched"],
+            float(row["rmsd_before"]),
+            float(row["rmsd_after"]),
+            float(row["ligand_displacement_mean"]),
+        )
 
     with Timer("Parse PPI residue list", log):
         ppi = parse_ppi_file(args.ppi_file)
@@ -667,8 +886,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Map poses (centers)
     with Timer("Project peptide centers to surface + map to spherical UV", log):
-        pose_theta, pose_phi, pose_dist, pose_ids, scores = [], [], [], [], []
-        for pose in poses:
+        pose_theta, pose_phi, pose_dist, pose_ids, scores, mapped_set_ids = [], [], [], [], [], []
+        for i_pose, pose in enumerate(poses):
             pep_coords = coords_from_atoms(pose.peptide_atoms)
             if pep_coords.size == 0:
                 continue
@@ -688,7 +907,9 @@ def main(argv: list[str] | None = None) -> int:
             pose_theta.append(th)
             pose_phi.append(ph)
             pose_dist.append(pr.distance)
-            pose_ids.append(pose.pose_id)
+            sid = pose_set_ids[i_pose] if i_pose < len(pose_set_ids) else "set000"
+            pose_ids.append(f"{sid}:{pose.pose_id}")
+            mapped_set_ids.append(sid)
             scores.append(pose.vina_score)
 
         pose_theta = np.array(pose_theta, float)
@@ -918,7 +1139,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ps = PlotSpec(
         map_name=args.map,
-        map_title=_infer_map_title(args.protein, args.peptides, args.map_title),
+        map_title=_infer_map_title(reference_set_id, args.map_title),
         pose_layers=tuple(args.pose_layer),
         weight_mode=args.weight,
         out_format=args.format,
@@ -989,10 +1210,21 @@ def main(argv: list[str] | None = None) -> int:
             pose_csv = out_prefix.with_name(out_prefix.name + "_poses_mapped.csv")
             with pose_csv.open("w", newline="") as f:
                 wcsv = csv.writer(f)
-                wcsv.writerow(["pose_id", "vina_score", "theta", "phi", "proj_distance", "cluster_id"])
+                wcsv.writerow([
+                    "set_id",
+                    "reference_set_id",
+                    "pose_id",
+                    "vina_score",
+                    "theta",
+                    "phi",
+                    "proj_distance",
+                    "cluster_id",
+                ])
                 for i in ordered_idx:
                     wcsv.writerow(
                         [
+                            mapped_set_ids[i],
+                            reference_set_id,
                             pose_ids[i],
                             _format_csv_cell(scores[i]),
                             _format_csv_cell(pose_theta[i]),
@@ -1038,6 +1270,58 @@ def main(argv: list[str] | None = None) -> int:
                         ]
                     )
             log.info("Wrote CSV: %s", clusters_csv)
+
+            align_csv = out_prefix.with_name(out_prefix.name + "_alignment_report.csv")
+            with align_csv.open("w", newline="") as f:
+                wcsv = csv.writer(f)
+                wcsv.writerow(
+                    [
+                        "set_id",
+                        "reference_set_id",
+                        "n_ca_matched",
+                        "rmsd_before",
+                        "rmsd_after",
+                        "ligand_displacement_min",
+                        "ligand_displacement_max",
+                        "ligand_displacement_mean",
+                        "ligand_displacement_std",
+                        "alignment_enabled",
+                        "alignment_atom_selection",
+                        "alignment_mode",
+                        "dockmap_version",
+                    ]
+                )
+                for row in alignment_rows:
+                    wcsv.writerow(
+                        [
+                            row["set_id"],
+                            row["reference_set_id"],
+                            row["n_ca_matched"],
+                            _format_csv_cell(row["rmsd_before"]),
+                            _format_csv_cell(row["rmsd_after"]),
+                            _format_csv_cell(row["ligand_displacement_min"]),
+                            _format_csv_cell(row["ligand_displacement_max"]),
+                            _format_csv_cell(row["ligand_displacement_mean"]),
+                            _format_csv_cell(row["ligand_displacement_std"]),
+                            row["alignment_enabled"],
+                            "CA",
+                            "rigid_kabsch" if perform_alignment else "none",
+                            __version__,
+                        ]
+                    )
+            log.info("Wrote CSV: %s", align_csv)
+
+            align_json = out_prefix.with_name(out_prefix.name + "_alignment_report.json")
+            payload = {
+                "reference_set_id": reference_set_id,
+                "alignment_enabled": perform_alignment,
+                "alignment_atom_selection": "CA",
+                "alignment_mode": "rigid_kabsch" if perform_alignment else "none",
+                "dockmap_version": __version__,
+                "sets": alignment_rows,
+            }
+            align_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            log.info("Wrote JSON: %s", align_json)
 
             if ppi_contour_theta is not None and ppi_contour_phi is not None:
                 ppi_csv = out_prefix.with_name(out_prefix.name + "_ppi_contour_mapped.csv")
