@@ -1,4 +1,4 @@
-# dockmap (v0.3.2)
+# dockmap (v1.5.0)
 
 Creative 2D “world map” of docking locations on a protein surface from many peptide poses,
 with an overlay of a known PPI region.
