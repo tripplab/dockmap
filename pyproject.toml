@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dockmap"
-version = "0.3.2"
+version = "1.5.0"
 description = "Protein surface 2D map of docking sites with QuickSurf-like surface and PPI overlay"
 readme = "README.md"
 requires-python = ">=3.9"
