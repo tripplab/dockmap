@@ -22,28 +22,31 @@ This command writes `docs/dockmap_methodology_infographic.png` in your working t
 
 ## What it does
 
-Given:
+Given one or more docking **sets** (repeatable `--set`), each containing:
 
-- a **protein** structure in PDB format
+- a **protein target** PDB
 - a **peptide poses** PDB containing many poses (poses separated by `END`, `ENDMDL`, and/or `MODEL ... ENDMDL`)
 - a **scores** text file (one Vina score per pose, same order as poses)
 - a **PPI residue list** file (one residue per line)
 
 `dockmap` will:
 
-1. Build a QuickSurf-like protein surface mesh internally.
-2. For each peptide pose:
+1. Load all sets.
+2. Align target proteins to a reference set (`--reference-set`, default first set) using rigid Cα superposition
+   and apply that transform to each set's ligand poses (alignment is skipped automatically for a single set, or with `--no-align`).
+3. Build a QuickSurf-like protein surface mesh internally (reference frame).
+4. For each peptide pose across all sets:
    - compute the peptide center (COM or COG)
    - project it to the protein surface
    - map that surface point to spherical coordinates `(theta, phi)`
    - project `(theta, phi)` to a 2D map projection (`equirect`, `mollweide`, or `hammer`)
-3. Convert the PPI residue list to a 2D footprint.
-4. Create a 2D figure showing:
+5. Convert the PPI residue list to a 2D footprint.
+6. Create a 2D figure showing:
    - docking locations (scatter/hexbin/density/trace)
    - PPI overlay (points and/or contour)
    - optional background (radial or curvature-proxy relief)
-5. Write CSVs with mapped coordinates.
-6. Optionally export the computed surface mesh (OBJ/PLY/STL).
+7. Write CSV/JSON reports with mapped coordinates and alignment metrics.
+8. Optionally export the computed surface mesh (OBJ/PLY/STL).
 
 ---
 
@@ -110,11 +113,17 @@ dockmap -h
 
 ## Input files
 
-### 1) Protein PDB (`--protein`) **required**
+### 1) Docking set descriptor (`--set`) **required, repeatable**
 
-Single structure with `ATOM`/`HETATM` records.
+Format:
 
-### 2) Peptide poses PDB (`--peptides`) **required**
+```text
+set_id:target.pdb:peptide_poses.pdb:vina_scores.txt
+```
+
+Where target and pose coordinates are PDB and scores are one numeric value per pose.
+
+### 2) Peptide poses PDB
 
 Multiple poses in one file; parser supports:
 
@@ -122,7 +131,7 @@ Multiple poses in one file; parser supports:
 - `ENDMDL` between poses
 - `MODEL ... ENDMDL` blocks
 
-### 3) Score file (`--scores`) **required**
+### 3) Score file
 
 Plain text, one numeric score per pose, matching pose order in `--peptides`.
 
@@ -145,9 +154,7 @@ Minimal run (map + CSV outputs):
 
 ```bash
 dockmap \
-  --protein protein.pdb \
-  --peptides peptide_poses.pdb \
-  --scores vina_scores.txt \
+  --set s1:protein.pdb:peptide_poses.pdb:vina_scores.txt \
   --ppi-file ppi.txt \
   --cluster-distance 15 \
   --out-prefix docking_map
@@ -157,10 +164,10 @@ Example fuller run (density layer + curvature background + mesh export):
 
 ```bash
 dockmap \
-  --protein protein.pdb \
-  --peptides peptide_poses.pdb \
-  --scores vina_scores.txt \
+  --set ref:protein_ref.pdb:poses_ref.pdb:scores_ref.txt \
+  --set alt:protein_alt.pdb:poses_alt.pdb:scores_alt.txt \
   --ppi-file ppi.txt \
+  --reference-set ref \
   --map mollweide \
   --pose-layer density \
   --weight exp \
