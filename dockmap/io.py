@@ -164,6 +164,51 @@ def load_poses(peptide_pdb: str | Path, scores_txt: str | Path) -> list[Pose]:
 def coords_from_atoms(atoms: list[AtomRecord]) -> np.ndarray:
     return np.array([a.coord for a in atoms], dtype=float)
 
+
+def _format_pdb_atom_line(record: str, serial: int, atom: AtomRecord) -> str:
+    """Format an ATOM/HETATM line with fixed-column PDB layout."""
+    name = atom.name[:4].rjust(4)
+    altloc = " "
+    resname = (atom.resname or "UNK")[:3].rjust(3)
+    chain = (atom.chain or "?")[:1]
+    resseq = int(atom.resseq)
+    icode = (atom.icode or "")[:1]
+    x, y, z = [float(v) for v in atom.coord]
+    occupancy = 1.00
+    temp_factor = 0.00
+    element = (atom.element or _guess_element(atom.name)).strip().upper()[:2].rjust(2)
+    charge = "  "
+    return (
+        f"{record:<6}{serial:>5} "
+        f"{name}{altloc}{resname} {chain}{resseq:>4}{icode:1}   "
+        f"{x:>8.3f}{y:>8.3f}{z:>8.3f}"
+        f"{occupancy:>6.2f}{temp_factor:>6.2f}          "
+        f"{element}{charge}"
+    )
+
+
+def write_pdb_atoms(path: str | Path, atoms: list[AtomRecord], record: str = "ATOM") -> None:
+    """Write atoms to a single-model PDB file."""
+    p = Path(path)
+    lines = [_format_pdb_atom_line(record, i, a) for i, a in enumerate(atoms, start=1)]
+    lines.append("END")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_pdb_poses(path: str | Path, poses: list[Pose], record: str = "ATOM") -> None:
+    """Write poses to a multi-model PDB file (MODEL/ENDMDL blocks)."""
+    p = Path(path)
+    lines: list[str] = []
+    serial = 1
+    for model_idx, pose in enumerate(poses, start=1):
+        lines.append(f"MODEL     {model_idx:>4}")
+        for a in pose.peptide_atoms:
+            lines.append(_format_pdb_atom_line(record, serial, a))
+            serial += 1
+        lines.append("ENDMDL")
+    lines.append("END")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 def pose_ca_trace_coords(atoms: list[AtomRecord]) -> np.ndarray:
     """
     Extract an ordered Cα trace from a pose.
@@ -267,5 +312,4 @@ def validate_ppi_residues_exist(
     }
     ok = (len(missing) == 0)
     return ok, report
-
 
