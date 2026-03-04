@@ -29,6 +29,8 @@ from .io import (
     parse_ppi_file,
     protein_residue_inventory,
     validate_ppi_residues_exist,
+    write_pdb_atoms,
+    write_pdb_poses,
     AtomRecord,
     Pose,
 )
@@ -92,10 +94,10 @@ def _kabsch_rigid_transform(mobile: np.ndarray, reference: np.ndarray) -> tuple[
     xr = reference - cr
     h = xm.T @ xr
     u, _, vt = np.linalg.svd(h)
-    r = vt.T @ u.T
+    r = u @ vt
     if np.linalg.det(r) < 0:
         vt[-1, :] *= -1
-        r = vt.T @ u.T
+        r = u @ vt
     t = cr - (cm @ r)
     return r, t
 
@@ -478,6 +480,23 @@ def _build_parser() -> argparse.ArgumentParser:
     g_out.add_argument("--mesh-format", default="ply", choices=["obj", "ply", "stl"], help="Mesh export format.")
     g_out.add_argument("--mesh-path", default=None, help="Explicit mesh output path (optional).")
     g_out.add_argument(
+        "--export-aligned-pdbs",
+        action="store_true",
+        default=False,
+        help=(
+            "Write transformed/aligned coordinates for each set as PDB files "
+            "(protein + multi-model poses)."
+        ),
+    )
+    g_out.add_argument(
+        "--aligned-pdb-dir",
+        default=None,
+        help=(
+            "Output directory for --export-aligned-pdbs files. "
+            "Default: '<out-prefix>_aligned_pdbs'."
+        ),
+    )
+    g_out.add_argument(
         "--mesh-vertex-scalar",
         default="none",
         choices=["none", "density", "curv_proxy"],
@@ -696,13 +715,15 @@ def main(argv: list[str] | None = None) -> int:
         args.ppi_residue_point,
     )
     log.info(
-        "Output options | out_prefix=%s | format=%s | write_csv=%s | export_mesh=%s | mesh_format=%s | mesh_path=%s",
+        "Output options | out_prefix=%s | format=%s | write_csv=%s | export_mesh=%s | mesh_format=%s | mesh_path=%s | export_aligned_pdbs=%s | aligned_pdb_dir=%s",
         args.out_prefix,
         args.format,
         args.write_csv,
         args.export_mesh,
         args.mesh_format,
         args.mesh_path,
+        args.export_aligned_pdbs,
+        args.aligned_pdb_dir,
     )
 
     # ---- Load multi-set inputs
@@ -819,6 +840,17 @@ def main(argv: list[str] | None = None) -> int:
             float(row["rmsd_after"]),
             float(row["ligand_displacement_mean"]),
         )
+
+    if args.export_aligned_pdbs:
+        out_prefix = Path(args.out_prefix)
+        aligned_dir = Path(args.aligned_pdb_dir) if args.aligned_pdb_dir else out_prefix.with_name(out_prefix.name + "_aligned_pdbs")
+        aligned_dir.mkdir(parents=True, exist_ok=True)
+        for ds in aligned_sets:
+            protein_path = aligned_dir / f"{ds.set_id}_protein_aligned.pdb"
+            poses_path = aligned_dir / f"{ds.set_id}_poses_aligned.pdb"
+            write_pdb_atoms(protein_path, ds.protein_atoms, record="ATOM")
+            write_pdb_poses(poses_path, ds.poses, record="HETATM")
+        log.info("Exported aligned PDBs for %d sets to: %s", len(aligned_sets), aligned_dir)
 
     with Timer("Parse PPI residue list", log):
         ppi = parse_ppi_file(args.ppi_file)
