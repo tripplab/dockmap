@@ -33,6 +33,12 @@ class PlotSpec:
     dpi: int = 300
 
 
+def _map_title_with_pose_count(map_name: str, map_title: str | None, mapped_pose_count: int) -> str:
+    """Build a map title that always includes the mapped pose count."""
+    base_title = map_title or f"Docking site map ({map_name})"
+    return f"{base_title}\nMapped poses: {mapped_pose_count}"
+
+
 def _cluster_colors(cluster_ids: np.ndarray, single_color: str | None) -> dict[int, tuple[float, float, float, float] | str]:
     unique = sorted({int(c) for c in cluster_ids.tolist()})
     if not unique:
@@ -379,7 +385,7 @@ def plot_map(
     fig = plt.figure(figsize=(10, 5.2))
     ax = fig.add_subplot(111)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(plot_spec.map_title or f"Docking site map ({map_name})")
+    ax.set_title(_map_title_with_pose_count(map_name, plot_spec.map_title, int(pose_theta.size)))
 
     _draw_theta_phi_markers(ax, map_name)
 
