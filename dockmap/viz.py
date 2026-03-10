@@ -21,6 +21,45 @@ POSE_DENSITY_CMAP = "magma"
 BACKGROUND_CMAP = "viridis"
 
 
+def compute_ppi_contour_field(
+    ppi_contour_theta: np.ndarray,
+    ppi_contour_phi: np.ndarray,
+    *,
+    lon_bins: int,
+    lat_bins: int,
+    blur_sigma_px: float,
+    levels: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Build PPI contour field + explicit contour levels, or return None when unavailable."""
+    if ppi_contour_theta is None or ppi_contour_phi is None:
+        return None
+    if len(ppi_contour_theta) < 20:
+        # Match plotting behavior: sparse atom clouds are rendered as scatter, not contours.
+        return None
+
+    p_lon = np.asarray(ppi_contour_theta, dtype=float)
+    p_lat = (np.pi / 2) - np.asarray(ppi_contour_phi, dtype=float)
+
+    n_lon = max(int(lon_bins), 1)
+    n_lat = max(int(lat_bins), 1)
+    n_levels = max(int(levels), 1)
+    sigma_px = max(float(blur_sigma_px), 1e-6)
+
+    lon_edges = np.linspace(-np.pi, np.pi, n_lon + 1)
+    lat_edges = np.linspace(-np.pi / 2, np.pi / 2, n_lat + 1)
+    hist, _, _ = np.histogram2d(p_lat, p_lon, bins=[lat_edges, lon_edges])
+    field = _gaussian_blur_fft(hist, sigma_px=sigma_px)
+
+    fmin = float(np.min(field))
+    fmax = float(np.max(field))
+    if (not np.isfinite(fmin)) or (not np.isfinite(fmax)) or fmax <= fmin:
+        return None
+
+    # Explicit values keep rendering + CSV annotation in lockstep.
+    level_values = np.linspace(fmin, fmax, n_levels + 2, dtype=float)[1:-1]
+    return lon_edges, lat_edges, field, level_values
+
+
 @dataclass(frozen=True)
 class PlotSpec:
     map_name: str = "mollweide"
@@ -354,6 +393,11 @@ def plot_map(
     plot_spec: PlotSpec,
     ppi_contour_theta: np.ndarray | None = None,
     ppi_contour_phi: np.ndarray | None = None,
+    ppi_contour_lon_bins: int = 360,
+    ppi_contour_lat_bins: int = 180,
+    ppi_contour_blur_sigma_px: float = 2.0,
+    ppi_contour_levels: int = 5,
+    ppi_contour_linewidth: float = 1.2,
     ppi_points_theta: np.ndarray | None = None,
     ppi_points_phi: np.ndarray | None = None,
     ppi_points_labels: list[str] | None = None,
@@ -620,19 +664,23 @@ def plot_map(
     # 1) Atom-cloud contour footprint
     if ppi_contour_theta is not None and ppi_contour_phi is not None and len(ppi_contour_theta) > 0:
         p_lon = ppi_contour_theta
-        p_lat = (np.pi / 2) - ppi_contour_phi
 
-        if len(p_lon) >= 20:
-            lon_edges = np.linspace(-np.pi, np.pi, 360 + 1)
-            lat_edges = np.linspace(-np.pi / 2, np.pi / 2, 180 + 1)
-            P, _, _ = np.histogram2d(p_lat, p_lon, bins=[lat_edges, lon_edges])
-            Ps = _gaussian_blur_fft(P, sigma_px=2.0)
-
+        contour_payload = compute_ppi_contour_field(
+            ppi_contour_theta,
+            ppi_contour_phi,
+            lon_bins=ppi_contour_lon_bins,
+            lat_bins=ppi_contour_lat_bins,
+            blur_sigma_px=ppi_contour_blur_sigma_px,
+            levels=ppi_contour_levels,
+        )
+        if contour_payload is not None:
+            lon_edges, lat_edges, Ps, level_values = contour_payload
+            lw = max(float(ppi_contour_linewidth), 0.0)
             lon_cent = 0.5 * (lon_edges[:-1] + lon_edges[1:])
             lat_cent = 0.5 * (lat_edges[:-1] + lat_edges[1:])
             LON, LAT = np.meshgrid(lon_cent, lat_cent)
             X, Y = project_to_2d(LON, (np.pi / 2 - LAT), map_name)
-            ax.contour(X, Y, Ps, levels=5, linewidths=1.2, zorder=3)
+            ax.contour(X, Y, Ps, levels=level_values, linewidths=lw, zorder=3)
         else:
             px, py = project_to_2d(p_lon, ppi_contour_phi, map_name)
             ax.scatter(px, py, s=18, alpha=0.9, zorder=3)

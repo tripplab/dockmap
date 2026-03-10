@@ -39,7 +39,7 @@ from .project import project_point_to_surface_nearest, project_point_to_surface_
 from .mapproj import surface_point_to_spherical_uv, auto_seam_rotation, apply_seam_rotation
 from .ppi import ppi_residue_points_uv, ppi_atom_cloud_uv
 from .clustering import cluster_connected_components, reorder_clusters_and_poses
-from .viz import plot_map, PlotSpec
+from .viz import plot_map, PlotSpec, compute_ppi_contour_field
 from . import __version__
 
 log = get_logger(__name__)
@@ -170,6 +170,60 @@ def _pose_id_to_ligid(pose_id: str) -> str:
     if not digits:
         return f"LIG{pose_id}"
     return f"LIG{int(digits):04d}"
+
+
+def _ppi_contour_level_index_max_for_centroids(
+    cluster_theta: np.ndarray,
+    cluster_phi: np.ndarray,
+    ppi_contour_theta: np.ndarray | None,
+    ppi_contour_phi: np.ndarray | None,
+    lon_bins: int,
+    lat_bins: int,
+    blur_sigma_px: float,
+    levels: int,
+) -> list[int | None]:
+    """Return highest crossed contour level index (1..N) per centroid, or None if unavailable/outside."""
+    n = len(cluster_theta)
+    if n == 0:
+        return []
+
+    payload = compute_ppi_contour_field(
+        ppi_contour_theta,
+        ppi_contour_phi,
+        lon_bins=lon_bins,
+        lat_bins=lat_bins,
+        blur_sigma_px=blur_sigma_px,
+        levels=levels,
+    )
+    if payload is None:
+        return [None] * n
+
+    lon_edges, lat_edges, field, level_values = payload
+    out: list[int | None] = []
+
+    for th, ph in zip(cluster_theta, cluster_phi):
+        lon = float(th)
+        lat = float((np.pi / 2) - ph)
+
+        # Keep within histogram domain (half-open bins at right edge).
+        lon = min(max(lon, float(lon_edges[0])), float(lon_edges[-1]) - 1e-12)
+        lat = min(max(lat, float(lat_edges[0])), float(lat_edges[-1]) - 1e-12)
+
+        i_lon = int(np.searchsorted(lon_edges, lon, side="right") - 1)
+        i_lat = int(np.searchsorted(lat_edges, lat, side="right") - 1)
+        if i_lon < 0 or i_lon >= field.shape[1] or i_lat < 0 or i_lat >= field.shape[0]:
+            out.append(None)
+            continue
+
+        val = float(field[i_lat, i_lon])
+        if not np.isfinite(val):
+            out.append(None)
+            continue
+
+        crossed = int(np.sum(val >= (level_values - 1e-12)))
+        out.append(crossed if crossed > 0 else None)
+
+    return out
 
 
 def _extract_ca_trace_atoms(peptide_atoms: list[AtomRecord]) -> list[AtomRecord]:
@@ -400,6 +454,49 @@ def _build_parser() -> argparse.ArgumentParser:
             "Distance cutoff (Å) used by --ppi-atom-filter near_surface. "
             "Larger values keep more atoms and are recommended for very smooth/coarse QuickSurf meshes "
             "(e.g., grid-spacing 1.5 and large radius-scale)."
+        ),
+    )
+    g_ppi.add_argument(
+        "--ppi-contour-lon-bins",
+        type=int,
+        default=360,
+        help=(
+            "When --ppi-footprint atom_contour, number of longitude bins used to build the 2D histogram "
+            "before smoothing/contouring. Higher values capture finer detail but can be noisier."
+        ),
+    )
+    g_ppi.add_argument(
+        "--ppi-contour-lat-bins",
+        type=int,
+        default=180,
+        help=(
+            "When --ppi-footprint atom_contour, number of latitude bins used to build the 2D histogram "
+            "before smoothing/contouring. Higher values capture finer detail but can be noisier."
+        ),
+    )
+    g_ppi.add_argument(
+        "--ppi-contour-blur-sigma-px",
+        type=float,
+        default=2.0,
+        help=(
+            "When --ppi-footprint atom_contour, Gaussian blur sigma in histogram-pixel units. "
+            "Larger values produce smoother, broader contours; smaller values preserve sharper detail."
+        ),
+    )
+    g_ppi.add_argument(
+        "--ppi-contour-levels",
+        type=int,
+        default=5,
+        help=(
+            "When --ppi-footprint atom_contour, number of contour levels to draw."
+        ),
+    )
+    g_ppi.add_argument(
+        "--ppi-contour-linewidth",
+        type=float,
+        default=1.2,
+        help=(
+            "When --ppi-footprint atom_contour, contour line width passed to matplotlib."
         ),
     )
 
@@ -1188,7 +1285,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
     log.info(
-        "Render step options | map=%s | pose_layers=%s | weight=%s | pose_density_sigma=%s | format=%s | background=%s | cluster_contour=%s",
+        "Render step options | map=%s | pose_layers=%s | weight=%s | pose_density_sigma=%s | format=%s | background=%s | cluster_contour=%s | ppi_contour_bins=%dx%d | ppi_contour_blur_sigma_px=%s | ppi_contour_levels=%s | ppi_contour_linewidth=%s",
         args.map,
         ",".join(args.pose_layer),
         args.weight,
@@ -1196,6 +1293,11 @@ def main(argv: list[str] | None = None) -> int:
         args.format,
         args.background,
         args.cluster_contour,
+        args.ppi_contour_lon_bins,
+        args.ppi_contour_lat_bins,
+        args.ppi_contour_blur_sigma_px,
+        args.ppi_contour_levels,
+        args.ppi_contour_linewidth,
     )
 
     with Timer("Render 2D map", log):
@@ -1207,6 +1309,11 @@ def main(argv: list[str] | None = None) -> int:
             plot_spec=ps,
             ppi_contour_theta=ppi_contour_theta,
             ppi_contour_phi=ppi_contour_phi,
+            ppi_contour_lon_bins=args.ppi_contour_lon_bins,
+            ppi_contour_lat_bins=args.ppi_contour_lat_bins,
+            ppi_contour_blur_sigma_px=args.ppi_contour_blur_sigma_px,
+            ppi_contour_levels=args.ppi_contour_levels,
+            ppi_contour_linewidth=args.ppi_contour_linewidth,
             ppi_points_theta=ppi_points_theta,
             ppi_points_phi=ppi_points_phi,
             ppi_points_labels=ppi_points_labels,
@@ -1232,6 +1339,17 @@ def main(argv: list[str] | None = None) -> int:
             background_colorbar_vmax=args.background_colorbar_vmax,
 
         )
+
+    cluster_ppi_contour_level_index_max = _ppi_contour_level_index_max_for_centroids(
+        cluster_theta=cluster_theta,
+        cluster_phi=cluster_phi,
+        ppi_contour_theta=ppi_contour_theta,
+        ppi_contour_phi=ppi_contour_phi,
+        lon_bins=args.ppi_contour_lon_bins,
+        lat_bins=args.ppi_contour_lat_bins,
+        blur_sigma_px=args.ppi_contour_blur_sigma_px,
+        levels=args.ppi_contour_levels,
+    )
 
     log.info("Wrote map: %s", fig_path)
 
@@ -1283,9 +1401,11 @@ def main(argv: list[str] | None = None) -> int:
                         "p_value",
                         "theta_centroid",
                         "phi_centroid",
+                        "ppi_contour_level_index_max",
                     ]
                 )
-                for row in cluster_summaries:
+                for i, row in enumerate(cluster_summaries):
+                    level_idx = cluster_ppi_contour_level_index_max[i] if i < len(cluster_ppi_contour_level_index_max) else None
                     wcsv.writerow(
                         [
                             row["cluster_id"],
@@ -1297,8 +1417,9 @@ def main(argv: list[str] | None = None) -> int:
                             _format_csv_cell(row["vina_score_avg"]),
                             _format_csv_cell(row["vina_score_stddev"]),
                             _format_csv_cell(row["p_value"]),
-                            _format_csv_cell(row["theta_centroid"]),
-                            _format_csv_cell(row["phi_centroid"]),
+                            _format_csv_cell(np.rad2deg(float(row["theta_centroid"]))),
+                            _format_csv_cell(np.rad2deg(float(row["phi_centroid"]))),
+                            "" if level_idx is None else level_idx,
                         ]
                     )
             log.info("Wrote CSV: %s", clusters_csv)
