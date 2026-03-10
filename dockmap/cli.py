@@ -1364,53 +1364,37 @@ def main(argv: list[str] | None = None) -> int:
         for i, row in enumerate(cluster_summaries)
         if i < len(cluster_inside_levels) and int(cluster_inside_levels[i]) != 0
     }
-    print(f"Total clusters found: {total_clusters_found}, total inside: {len(inside_cluster_ids)}")
-
-    best_inside_cluster_row: dict[str, float | int | str] | None = None
-    for row in cluster_summaries:
-        cid = int(row["cluster_id"])
-        if cid not in inside_cluster_ids:
-            continue
-        if best_inside_cluster_row is None:
-            best_inside_cluster_row = row
-            continue
-
-        cur_avg = float(row["vina_score_avg"])
-        best_avg = float(best_inside_cluster_row["vina_score_avg"])
-        if cur_avg < best_avg:
-            best_inside_cluster_row = row
-            continue
-        if cur_avg == best_avg and int(row["n_poses"]) > int(best_inside_cluster_row["n_poses"]):
-            best_inside_cluster_row = row
+    print(f"[RESULT] Total clusters found: {total_clusters_found}, total inside: {len(inside_cluster_ids)}")
 
     top_inside_cluster_pose_rows: list[list[object]] = []
-    if best_inside_cluster_row is not None:
-        best_cluster_id = int(best_inside_cluster_row["cluster_id"])
-        best_cluster_pose_idx = [i for i, cid in enumerate(cluster_ids) if int(cid) == best_cluster_id]
-        best_cluster_pose_idx.sort(key=lambda i: (float(scores[i]), str(pose_ids[i])))
-        for i in best_cluster_pose_idx[:5]:
+    inside_cluster_rows = [
+        row for row in cluster_summaries if int(row["cluster_id"]) in inside_cluster_ids
+    ]
+    for cluster_row in inside_cluster_rows:
+        cluster_id = int(cluster_row["cluster_id"])
+        cluster_size = int(cluster_row["n_poses"])
+        cluster_vina_avg = _format_csv_cell(cluster_row["vina_score_avg"])
+        cluster_pose_idx = [i for i, cid in enumerate(cluster_ids) if int(cid) == cluster_id]
+        cluster_pose_idx.sort(key=lambda i: (float(scores[i]), str(pose_ids[i])))
+        for i in cluster_pose_idx[:3]:
             top_inside_cluster_pose_rows.append(
                 [
                     mapped_set_ids[i],
-                    reference_set_id,
                     pose_ids[i],
                     _format_csv_cell(scores[i]),
-                    _format_csv_cell(pose_theta[i]),
-                    _format_csv_cell(pose_phi[i]),
-                    _format_csv_cell(pose_dist[i]),
-                    int(cluster_ids[i]),
+                    cluster_id,
+                    cluster_size,
+                    cluster_vina_avg,
                 ]
             )
 
-        print(
-            "Top poses from best inside cluster "
-            f"(cluster_id={best_cluster_id}, vina_score_avg={_format_csv_cell(best_inside_cluster_row['vina_score_avg'])}):"
-        )
-        print("set_id,reference_set_id,pose_id,vina_score,theta,phi,proj_distance,cluster_id")
+    if top_inside_cluster_pose_rows:
+        print("[RESULT] Top-3 poses for each inside cluster:")
+        print("[RESULT] set_id,pose_id,vina_score,cluster_id,cluster_size,vina_score_avg")
         for row in top_inside_cluster_pose_rows:
-            print(",".join(str(v) for v in row))
+            print(f"[RESULT] {','.join(str(v) for v in row)}")
     else:
-        print("No clusters found inside PPI contours (centroid_inside_level != 0).")
+        print("[RESULT] No clusters found inside PPI contours (centroid_inside_level != 0).")
 
     log.info("Wrote map: %s", fig_path)
 
@@ -1485,24 +1469,22 @@ def main(argv: list[str] | None = None) -> int:
                     )
             log.info("Wrote CSV: %s", clusters_csv)
 
-            best_top5_csv = out_prefix.with_name(out_prefix.name + "_best_inside_cluster_top5_poses.csv")
-            with best_top5_csv.open("w", newline="") as f:
+            best_top_csv = out_prefix.with_name(out_prefix.name + "_best_inside_cluster_top_poses.csv")
+            with best_top_csv.open("w", newline="") as f:
                 wcsv = csv.writer(f)
                 wcsv.writerow(
                     [
                         "set_id",
-                        "reference_set_id",
                         "pose_id",
                         "vina_score",
-                        "theta",
-                        "phi",
-                        "proj_distance",
                         "cluster_id",
+                        "cluster_size",
+                        "vina_score_avg",
                     ]
                 )
                 for row in top_inside_cluster_pose_rows:
                     wcsv.writerow(row)
-            log.info("Wrote CSV: %s", best_top5_csv)
+            log.info("Wrote CSV: %s", best_top_csv)
 
             align_csv = out_prefix.with_name(out_prefix.name + "_alignment_report.csv")
             with align_csv.open("w", newline="") as f:
