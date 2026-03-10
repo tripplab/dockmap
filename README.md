@@ -190,6 +190,30 @@ Typical outputs are:
 - `docking_map_ppi_residue_points_mapped.csv` (when residue-point footprint is generated)
 - `docking_map_quicksurf.ply` (if `--export-mesh`)
 
+### Cluster centroid vs PPI atom-contour annotation
+
+`docking_map_clusters.csv` includes one additional column:
+
+- `ppi_contour_level_index_max`
+
+This value reports, for each cluster centroid, the **highest crossed contour level index**
+for the PPI atom-contour field (`1..N`, where `N = --ppi-contour-levels`).
+
+Rules:
+
+- If the centroid is outside all contour levels, the field is empty (`NA`).
+- If contour classification is unavailable (for example, no PPI atom contour points, or sparse PPI atom-cloud
+  rendered as scatter fallback), the field is also empty (`NA`).
+- Cluster row ordering is unchanged (still ranked by cluster size, then existing tie-breakers).
+
+Contour classification is computed from the same histogram + blur + level construction used for rendering,
+using the user-selected contour controls:
+
+- `--ppi-contour-lon-bins`
+- `--ppi-contour-lat-bins`
+- `--ppi-contour-blur-sigma-px`
+- `--ppi-contour-levels`
+
 ---
 
 ## Tips
@@ -205,7 +229,8 @@ export MPLBACKEND=Agg
 ### Pose clustering
 
 Pose clustering uses **spherical angular distance** on `(theta, phi)` (great-circle distance on the unit sphere).
-`theta` and `phi` are written in **radians** in CSV outputs.
+By default, mapped angular coordinates in CSV outputs are written in **radians**.
+Exception: in `docking_map_clusters.csv`, `theta_centroid` and `phi_centroid` are written in **degrees**.
 
 Use `--cluster-distance` in **degrees** to set the clustering threshold (default: `15`).
 
