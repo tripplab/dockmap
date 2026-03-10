@@ -680,7 +680,16 @@ def plot_map(
             lat_cent = 0.5 * (lat_edges[:-1] + lat_edges[1:])
             LON, LAT = np.meshgrid(lon_cent, lat_cent)
             X, Y = project_to_2d(LON, (np.pi / 2 - LAT), map_name)
-            ax.contour(X, Y, Ps, levels=level_values, linewidths=lw, zorder=3)
+            contour_colors = plt.cm.turbo(np.linspace(0.35, 0.95, len(level_values)))
+            ax.contour(
+                X,
+                Y,
+                Ps,
+                levels=level_values,
+                linewidths=lw,
+                colors=contour_colors,
+                zorder=3,
+            )
         else:
             px, py = project_to_2d(p_lon, ppi_contour_phi, map_name)
             ax.scatter(px, py, s=18, alpha=0.9, zorder=3)
