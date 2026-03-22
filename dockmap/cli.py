@@ -699,6 +699,29 @@ def _build_parser() -> argparse.ArgumentParser:
             "Use 0 for no smoothing; small values (e.g., 2–5) reduce noise and produce a cleaner relief."
         ),
     )
+    g_adv.add_argument(
+        "--angle-grid-style",
+        default="normal",
+        choices=["off", "subtle", "normal", "strong"],
+        help=(
+            "Style for the theta/phi reference grid overlay. "
+            "'off' disables it; "
+            "'subtle' keeps it light; "
+            "'normal' is the default visible guide; "
+            "'strong' makes the reference lines more prominent."
+        ),
+    )
+    g_adv.add_argument(
+        "--angle-grid-color",
+        default="auto",
+        choices=["auto", "dark", "light"],
+        help=(
+            "Color mode for the theta/phi reference grid overlay. "
+            "'auto' uses dark lines when --background none and light lines otherwise; "
+            "'dark' always uses dark lines; "
+            "'light' always uses light lines."
+        ),
+    )
 
 
 
@@ -1273,6 +1296,8 @@ def main(argv: list[str] | None = None) -> int:
         weight_mode=args.weight,
         out_format=args.format,
         background=args.background,
+        angle_grid_style=args.angle_grid_style,
+        angle_grid_color=args.angle_grid_color,
         pose_density_sigma=args.pose_density_sigma,
     )
 
@@ -1285,13 +1310,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
     log.info(
-        "Render step options | map=%s | pose_layers=%s | weight=%s | pose_density_sigma=%s | format=%s | background=%s | cluster_contour=%s | ppi_contour_bins=%dx%d | ppi_contour_blur_sigma_px=%s | ppi_contour_levels=%s | ppi_contour_linewidth=%s",
+        "Render step options | map=%s | pose_layers=%s | weight=%s | pose_density_sigma=%s | format=%s | background=%s | angle_grid_style=%s | angle_grid_color=%s | cluster_contour=%s | ppi_contour_bins=%dx%d | ppi_contour_blur_sigma_px=%s | ppi_contour_levels=%s | ppi_contour_linewidth=%s",
         args.map,
         ",".join(args.pose_layer),
         args.weight,
         args.pose_density_sigma,
         args.format,
         args.background,
+        args.angle_grid_style,
+        args.angle_grid_color,
         args.cluster_contour,
         args.ppi_contour_lon_bins,
         args.ppi_contour_lat_bins,

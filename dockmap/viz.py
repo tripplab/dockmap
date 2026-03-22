@@ -67,6 +67,8 @@ class PlotSpec:
     pose_layers: tuple[str, ...] = ("scatter",)   # top->bottom subset of scatter|density|hexbin|trace|centroid
     weight_mode: str = "exp"      # none|exp|linear
     background: str = "none"      # none|curvature|radial
+    angle_grid_style: str = "normal"   # off|subtle|normal|strong
+    angle_grid_color: str = "auto"     # auto|dark|light
     pose_density_sigma: float = 2.0
     out_format: str = "png"
     dpi: int = 300
@@ -337,8 +339,39 @@ def _draw_pose_labels(
         )
 
 
-def _draw_theta_phi_markers(ax, map_name: str) -> None:
+def _draw_theta_phi_markers(
+    ax,
+    map_name: str,
+    *,
+    background: str,
+    style: str = "normal",
+    color_mode: str = "auto",
+) -> None:
     """Draw sparse theta/phi reference markers for all supported projections."""
+    style = style.lower()
+    if style == "off":
+        return
+
+    style_params = {
+        "subtle": {"alpha": 0.28, "linewidth": 0.70},
+        "normal": {"alpha": 0.42, "linewidth": 0.85},
+        "strong": {"alpha": 0.58, "linewidth": 1.00},
+    }
+    if style not in style_params:
+        raise ValueError(f"Unknown angle grid style: {style}")
+
+    if color_mode == "auto":
+        line_color = "#202020" if background == "none" else "white"
+    elif color_mode == "dark":
+        line_color = "#202020"
+    elif color_mode == "light":
+        line_color = "white"
+    else:
+        raise ValueError(f"Unknown angle grid color mode: {color_mode}")
+
+    line_alpha = style_params[style]["alpha"]
+    line_width = style_params[style]["linewidth"]
+
     theta_ticks = np.deg2rad(np.array([-120, -60, 0, 60, 120], float))
     phi_ticks = np.deg2rad(np.array([30, 60, 90, 120, 150], float))
 
@@ -347,7 +380,7 @@ def _draw_theta_phi_markers(ax, map_name: str) -> None:
     for theta in theta_ticks:
         theta_line = np.full_like(phi_line, theta)
         gx, gy = project_to_2d(theta_line, phi_line, map_name)
-        ax.plot(gx, gy, color="white", linewidth=0.55, alpha=0.16, zorder=1.6)
+        ax.plot(gx, gy, color=line_color, linewidth=line_width, alpha=line_alpha, zorder=1.6)
 
         lx, ly = project_to_2d(np.array([theta]), np.array([np.pi / 2]), map_name)
         ax.text(
@@ -368,7 +401,7 @@ def _draw_theta_phi_markers(ax, map_name: str) -> None:
     for phi in phi_ticks:
         phi_line = np.full_like(theta_line, phi)
         gx, gy = project_to_2d(theta_line, phi_line, map_name)
-        ax.plot(gx, gy, color="white", linewidth=0.55, alpha=0.16, zorder=1.6)
+        ax.plot(gx, gy, color=line_color, linewidth=line_width, alpha=line_alpha, zorder=1.6)
 
         lx, ly = project_to_2d(np.array([-np.deg2rad(170.0)]), np.array([phi]), map_name)
         ax.text(
@@ -431,8 +464,6 @@ def plot_map(
     ax.set_aspect("equal", adjustable="box")
     ax.set_title(_map_title_with_pose_count(map_name, plot_spec.map_title, int(pose_theta.size)))
 
-    _draw_theta_phi_markers(ax, map_name)
-
     # Background
     bg_mappable = None
     if plot_spec.background != "none":
@@ -475,6 +506,14 @@ def plot_map(
             # For normalized mode, use simple ticks for readability
             if background_colorbar_mode == "norm":
                 cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
+
+    _draw_theta_phi_markers(
+        ax,
+        map_name,
+        background=plot_spec.background,
+        style=plot_spec.angle_grid_style,
+        color_mode=plot_spec.angle_grid_color,
+    )
 
     # Wrap to avoid seam artifacts (for density)
     lon_w = np.concatenate([lon, lon - 2 * np.pi, lon + 2 * np.pi])
