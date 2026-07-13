@@ -6,6 +6,7 @@ import argparse
 import numbers
 from pathlib import Path
 import numpy as np
+import matplotlib.pyplot as plt
 import csv
 import json
 from dataclasses import dataclass
@@ -261,8 +262,8 @@ def _select_pose_indices_for_trace(mode: str, scores: np.ndarray, nposes: int) -
         raise ValueError(f"Invalid --trace-pose value: {mode!r} (use best, first, or integer N)") from e
 
 
-POSE_LAYER_CHOICES = ("scatter", "density", "hexbin", "trace", "centroid")
-POSE_LAYER_ORDER_TOP_TO_BOTTOM = ("centroid", "scatter", "trace", "hexbin", "density")
+POSE_LAYER_CHOICES = ("scatter", "density", "hexbin", "trace", "centroid", "md")
+POSE_LAYER_ORDER_TOP_TO_BOTTOM = ("centroid", "md", "scatter", "trace", "hexbin", "density")
 
 
 def _normalize_pose_layers(raw_layers: list[str] | None) -> list[str]:
@@ -284,6 +285,52 @@ def _normalize_pose_layers(raw_layers: list[str] | None) -> list[str]:
 
     selected = set(parsed)
     return [layer for layer in POSE_LAYER_ORDER_TOP_TO_BOTTOM if layer in selected]
+
+
+def _is_heavy_atom(atom: AtomRecord) -> bool:
+    """Return True for non-hydrogen atoms, using element with atom-name fallback."""
+    element = (atom.element or "").strip().upper()
+    if not element:
+        element = "".join(c for c in atom.name.strip() if c.isalpha()).upper()[:1]
+    return element != "H"
+
+
+def _pose_heavy_atom_cog(pose: Pose) -> np.ndarray:
+    """Geometric center of heavy atoms for a ligand pose."""
+    heavy_atoms = [a for a in pose.peptide_atoms if _is_heavy_atom(a)]
+    if not heavy_atoms:
+        raise ValueError(f"Pose {pose.pose_id} has no heavy atoms for --pose-layer md.")
+    return coords_from_atoms(heavy_atoms).mean(axis=0)
+
+
+def _angle_between_vectors_deg(a: np.ndarray, b: np.ndarray) -> float:
+    """Return the angle in degrees between two vectors."""
+    na = float(np.linalg.norm(a))
+    nb = float(np.linalg.norm(b))
+    if na <= 0.0 or nb <= 0.0:
+        return float("nan")
+    c = float(np.dot(a, b) / (na * nb))
+    c = min(1.0, max(-1.0, c))
+    return float(np.rad2deg(np.arccos(c)))
+
+
+def _write_md_profile_png(path: Path, r_com: np.ndarray, ro_com_deg: np.ndarray) -> None:
+    """Write the --pose-layer md two-panel diagnostic figure."""
+    pose_numbers = np.arange(1, len(r_com) + 1, dtype=int)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+
+    axes[0].plot(pose_numbers, r_com, marker="o", linewidth=1.6)
+    axes[0].set_xlabel("Pose number")
+    axes[0].set_ylabel("r COM (Å)")
+    axes[0].set_title("r vs pose number")
+
+    axes[1].plot(pose_numbers, ro_com_deg, marker="o", linewidth=1.6)
+    axes[1].set_xlabel("Pose number")
+    axes[1].set_ylabel("ro COM (degrees)")
+    axes[1].set_title("ro vs pose number")
+
+    fig.savefig(path, dpi=300)
+    plt.close(fig)
 
 
 def _infer_map_title(reference_set_id: str, explicit_title: str | None) -> str:
@@ -615,13 +662,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "How peptide poses are drawn on the 2D map. "
             "You can pass this flag multiple times (or comma-separate values) to draw multiple layers. "
-            "Layers are composited in fixed top-to-bottom order: centroid, scatter, trace, hexbin, density. "
+            "Layers are composited in fixed top-to-bottom order: centroid, md, scatter, trace, hexbin, density. "
             "Choices: "
             "'scatter' = plot one marker per pose (best for small N or top-N subsets); "
             "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
             "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
             "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\n<cluster_avg_vina>' (example: 1:215\n<-8.34>).\n"
+            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\n<cluster_avg_vina>' (example: 1:215\n<-8.34>); "
+            "'md' = connect ligand heavy-atom COMs in PDB MODEL order, marking first with a filled triangle and last with a filled circle, and write _md CSV/PNG outputs.\n"
             "Examples:\n"
             "  --pose-layer density\n"
             "  --pose-layer centroid --pose-layer scatter\n"
@@ -1287,6 +1335,66 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- Plot
     out_prefix = Path(args.out_prefix)
+
+    # ---- Molecular-dynamics-style COM trajectory (only when pose-layer md)
+    md_com_xyz = md_theta = md_phi = md_r_com = md_ro_com_deg = None
+    if "md" in args.pose_layer:
+        if len(poses) == 0:
+            raise SystemExit("No poses available for --pose-layer md.")
+
+        log.info("MD COM trajectory step options | atom_selection=heavy_atoms | output_suffix=_md | ro_units=degrees")
+        with Timer("Compute ligand heavy-atom COM trajectory", log):
+            com_rows: list[np.ndarray] = []
+            ths: list[float] = []
+            phs: list[float] = []
+            rs: list[float] = []
+
+            for pose in poses:
+                q = _pose_heavy_atom_cog(pose)
+                com_rows.append(q)
+                vec = q - protein_center
+                rs.append(float(np.linalg.norm(vec)))
+
+                if args.pose_projection == "raycast":
+                    pr = project_point_to_surface_raycast(q, protein_center, mesh)
+                else:
+                    pr = project_point_to_surface_nearest(q, mesh)
+
+                th, ph = surface_point_to_spherical_uv(pr.point, protein_center)
+                ths.append(th)
+                phs.append(ph)
+
+            md_com_xyz = np.array(com_rows, dtype=float)
+            md_theta = apply_seam_rotation(np.array(ths, dtype=float), rot)
+            md_phi = np.array(phs, dtype=float)
+            md_r_com = np.array(rs, dtype=float)
+
+            first_vec = md_com_xyz[0] - protein_center
+            md_ro_com_deg = np.array(
+                [_angle_between_vectors_deg(row - protein_center, first_vec) for row in md_com_xyz],
+                dtype=float,
+            )
+
+        md_csv = out_prefix.with_name(out_prefix.name + "_md.csv")
+        with md_csv.open("w", newline="") as f:
+            wcsv = csv.writer(f)
+            wcsv.writerow(["X COM", "Y COM", "Z COM", "r COM", "theta COM", "phi COM", "ro COM"])
+            for i in range(len(md_com_xyz)):
+                wcsv.writerow([
+                    _format_csv_cell(md_com_xyz[i, 0]),
+                    _format_csv_cell(md_com_xyz[i, 1]),
+                    _format_csv_cell(md_com_xyz[i, 2]),
+                    _format_csv_cell(md_r_com[i]),
+                    _format_csv_cell(md_theta[i]),
+                    _format_csv_cell(md_phi[i]),
+                    _format_csv_cell(md_ro_com_deg[i]),
+                ])
+        log.info("Wrote CSV: %s", md_csv)
+
+        md_png = out_prefix.with_name(out_prefix.name + "_md.png")
+        _write_md_profile_png(md_png, md_r_com, md_ro_com_deg)
+        log.info("Wrote MD profile figure: %s", md_png)
+
     fig_path = out_prefix.with_suffix("." + args.format)
 
     ps = PlotSpec(
@@ -1351,6 +1459,8 @@ def main(argv: list[str] | None = None) -> int:
             # UPDATED: pass multiple traces
             trace_lines=trace_lines,
             trace_labels=trace_labels,
+            md_theta=md_theta,
+            md_phi=md_phi,
             cluster_ids=cluster_ids,
             cluster_theta=cluster_theta,
             cluster_phi=cluster_phi,

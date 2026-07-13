@@ -440,6 +440,8 @@ def plot_map(
     pose_labels: list[str] | None = None,
     trace_lines: list[tuple[np.ndarray, np.ndarray]] | None = None,   # [(theta_i, phi_i), ...]
     trace_labels: list[str] | None = None,                            # optional label per trace (same order)
+    md_theta: np.ndarray | None = None,
+    md_phi: np.ndarray | None = None,
     cluster_ids: np.ndarray | None = None,
     cluster_theta: np.ndarray | None = None,
     cluster_phi: np.ndarray | None = None,
@@ -603,6 +605,40 @@ def plot_map(
                         fontsize=8,
                         zorder=8,
                     )
+
+        elif layer == "md":
+            if md_theta is None or md_phi is None:
+                raise ValueError("pose_layer includes md but md_theta/md_phi not provided.")
+            if len(md_theta) == 0:
+                continue
+
+            mx, my = project_to_2d(md_theta, md_phi, map_name)
+            ax.plot(mx, my, color="#111111", linewidth=1.8, alpha=0.95, zorder=5.5)
+            ax.scatter(
+                mx, my,
+                s=46, marker="o",
+                facecolors="#111111",
+                edgecolors="white",
+                linewidths=0.8,
+                alpha=0.75,
+                zorder=5.8,
+            )
+            ax.scatter(
+                [mx[0]], [my[0]],
+                s=150, marker="^",
+                facecolors="#111111",
+                edgecolors="white",
+                linewidths=1.0,
+                zorder=7.5,
+            )
+            ax.scatter(
+                [mx[-1]], [my[-1]],
+                s=150, marker="o",
+                facecolors="#111111",
+                edgecolors="white",
+                linewidths=1.0,
+                zorder=7.5,
+            )
 
         elif layer == "centroid":
             if cluster_theta is None or cluster_phi is None:
