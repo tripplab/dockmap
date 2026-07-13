@@ -42,11 +42,16 @@ Given one or more docking **sets** (repeatable `--set`), each containing:
    - project `(theta, phi)` to a 2D map projection (`equirect`, `mollweide`, or `hammer`)
 5. Convert the PPI residue list to a 2D footprint.
 6. Create a 2D figure showing:
-   - docking locations (scatter/hexbin/density/trace)
+   - docking locations (scatter/hexbin/density/trace/centroid/md)
    - PPI overlay (points and/or contour)
    - optional background (radial or curvature-proxy relief)
 7. Write CSV/JSON reports with mapped coordinates and alignment metrics.
 8. Optionally export the computed surface mesh (OBJ/PLY/STL).
+
+When `--pose-layer md` is selected, `dockmap` also treats the ligand poses like an ordered
+trajectory: it computes one heavy-atom geometric center per ligand `MODEL`, connects those
+COM points in PDB order on the map, marks the first pose with a filled triangle and the last
+pose with a filled circle, and writes `_md` CSV/PNG diagnostics.
 
 ---
 
@@ -106,6 +111,52 @@ python -m pip install ".[trimesh]"
 Verify CLI install:
 
 ```bash
+dockmap -h
+```
+
+### Updating an already installed copy
+
+If you already installed `dockmap` from a source checkout, update the checkout first and then
+reinstall into the same environment.
+
+#### pip environment
+
+```bash
+cd /path/to/dockmap
+git pull
+python -m pip install --upgrade .
+```
+
+If you installed in editable/developer mode, refresh dependencies and metadata with:
+
+```bash
+cd /path/to/dockmap
+git pull
+python -m pip install --upgrade -e .
+```
+
+#### micromamba environment
+
+```bash
+micromamba activate dockmap
+cd /path/to/dockmap
+git pull
+python -m pip install --upgrade .
+```
+
+If optional raycast dependencies were installed previously and you want to keep them current:
+
+```bash
+micromamba activate dockmap
+cd /path/to/dockmap
+git pull
+python -m pip install --upgrade ".[trimesh]"
+```
+
+After updating, confirm that the CLI on your `PATH` comes from the active environment:
+
+```bash
+which dockmap
 dockmap -h
 ```
 
@@ -177,6 +228,22 @@ dockmap \
   --out-prefix docking_map
 ```
 
+Example trajectory-style COM run (`md` layer):
+
+```bash
+dockmap \
+  --set traj:protein.pdb:ligand_models.pdb:vina_scores.txt \
+  --ppi-file ppi.txt \
+  --map mollweide \
+  --pose-layer density \
+  --pose-layer md \
+  --out-prefix docking_map
+```
+
+This overlays a connected ligand COM trajectory on `docking_map.png`, using the same
+`theta`/`phi` projection as the map. The first pose in the PDB `MODEL` order is marked with
+a filled triangle, and the last pose is marked with a filled circle.
+
 ---
 
 ## Outputs
@@ -189,6 +256,41 @@ Typical outputs are:
 - `docking_map_ppi_contour_mapped.csv` (when contour footprint is generated)
 - `docking_map_ppi_residue_points_mapped.csv` (when residue-point footprint is generated)
 - `docking_map_quicksurf.ply` (if `--export-mesh`)
+- `docking_map_md.csv` (if `--pose-layer md`)
+- `docking_map_md.png` (if `--pose-layer md`)
+
+
+### `--pose-layer md`: ligand COM trajectory
+
+Use `--pose-layer md` when the ligand poses PDB should be interpreted as an ordered series
+of `MODEL` poses, such as frames or ordered docking/MD-like snapshots. This layer:
+
+- computes one ligand COM per pose using the **geometric center of heavy atoms only**;
+- preserves the pose order found in the PDB file;
+- projects each COM through the same surface-map workflow used for other pose layers;
+- draws a line connecting COMs on the existing map by `theta COM` / `phi COM`;
+- marks the first pose with a filled triangle and the last pose with a filled circle;
+- writes `*_md.csv` and `*_md.png` outputs.
+
+CSV columns in `*_md.csv` are:
+
+```text
+X COM,Y COM,Z COM,r COM,theta COM,phi COM,ro COM
+```
+
+Column meanings:
+
+- `X COM`, `Y COM`, `Z COM`: heavy-atom ligand COM coordinates in the aligned/reference frame.
+- `r COM`: distance from the protein center to the ligand COM, in Å.
+- `theta COM`, `phi COM`: angular coordinates used by the map after seam rotation, written in radians.
+- `ro COM`: angle in degrees between each pose COM vector and the first pose COM vector.
+
+The `*_md.png` file contains two panels:
+
+1. `r COM` vs pose number.
+2. `ro COM` vs pose number.
+
+Pose number is the 1-based order found in the ligand PDB file.
 
 ### Cluster centroid vs PPI atom-contour annotation
 

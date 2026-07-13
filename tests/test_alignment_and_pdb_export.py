@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dockmap.cli import _kabsch_rigid_transform, _rmsd
+from dockmap.cli import _angle_between_vectors_deg, _kabsch_rigid_transform, _normalize_pose_layers, _pose_heavy_atom_cog, _rmsd
 from dockmap.io import AtomRecord, Pose, parse_pdb_atoms, write_pdb_atoms, write_pdb_poses
 
 
@@ -30,6 +30,25 @@ class AlignmentMathTests(unittest.TestCase):
 
         self.assertLess(rmsd_after, 1e-10)
         self.assertLessEqual(rmsd_after, rmsd_before + 1e-12)
+
+
+class MdPoseLayerTests(unittest.TestCase):
+    def test_pose_layer_md_is_valid_and_ordered_above_scatter(self):
+        self.assertEqual(_normalize_pose_layers(["scatter,md"]), ["md", "scatter"])
+
+    def test_pose_heavy_atom_cog_ignores_hydrogens(self):
+        atoms = [
+            AtomRecord(chain="A", resname="LIG", resseq=1, icode="", name="C1", element="C", coord=np.array([0.0, 0.0, 0.0])),
+            AtomRecord(chain="A", resname="LIG", resseq=1, icode="", name="O1", element="O", coord=np.array([2.0, 0.0, 0.0])),
+            AtomRecord(chain="A", resname="LIG", resseq=1, icode="", name="H1", element="H", coord=np.array([100.0, 0.0, 0.0])),
+        ]
+        pose = Pose(pose_id="pose0001", peptide_atoms=atoms, vina_score=-1.0)
+
+        np.testing.assert_allclose(_pose_heavy_atom_cog(pose), np.array([1.0, 0.0, 0.0]))
+
+    def test_angle_between_vectors_is_degrees(self):
+        angle = _angle_between_vectors_deg(np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+        self.assertAlmostEqual(angle, 90.0)
 
 
 class PdbExportTests(unittest.TestCase):
