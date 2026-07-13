@@ -442,6 +442,7 @@ def plot_map(
     trace_labels: list[str] | None = None,                            # optional label per trace (same order)
     md_theta: np.ndarray | None = None,
     md_phi: np.ndarray | None = None,
+    md_point_colors: np.ndarray | None = None,
     cluster_ids: np.ndarray | None = None,
     cluster_theta: np.ndarray | None = None,
     cluster_phi: np.ndarray | None = None,
@@ -614,10 +615,11 @@ def plot_map(
 
             mx, my = project_to_2d(md_theta, md_phi, map_name)
             ax.plot(mx, my, color="#111111", linewidth=1.8, alpha=0.95, zorder=5.5)
+            point_colors = md_point_colors if md_point_colors is not None else "#111111"
             ax.scatter(
                 mx, my,
                 s=46, marker="o",
-                facecolors="#111111",
+                facecolors=point_colors,
                 edgecolors="white",
                 linewidths=0.8,
                 alpha=0.75,
@@ -626,7 +628,7 @@ def plot_map(
             ax.scatter(
                 [mx[0]], [my[0]],
                 s=150, marker="^",
-                facecolors="#111111",
+                facecolors=point_colors[0] if md_point_colors is not None else "#111111",
                 edgecolors="white",
                 linewidths=1.0,
                 zorder=7.5,
@@ -634,7 +636,7 @@ def plot_map(
             ax.scatter(
                 [mx[-1]], [my[-1]],
                 s=150, marker="o",
-                facecolors="#111111",
+                facecolors=point_colors[-1] if md_point_colors is not None else "#111111",
                 edgecolors="white",
                 linewidths=1.0,
                 zorder=7.5,

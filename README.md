@@ -269,6 +269,7 @@ of `MODEL` poses, such as frames or ordered docking/MD-like snapshots. This laye
 - preserves the pose order found in the PDB file;
 - projects each COM through the same surface-map workflow used for other pose layers;
 - draws a line connecting COMs on the existing map by `theta COM` / `phi COM`;
+- color-codes MD COM points on the map by `--pose-layer-md-TL-distance` (default: `16` Å): green for `r COM <= threshold`, red for `r COM > threshold`;
 - marks the first pose with a filled triangle and the last pose with a filled circle;
 - writes `*_md.csv` and `*_md.png` outputs.
 
@@ -287,7 +288,7 @@ Column meanings:
 
 The `*_md.png` file contains two panels:
 
-1. `r COM` vs pose number.
+1. `r COM` vs pose number, with points color-coded by `--pose-layer-md-TL-distance` (default: `16` Å): green for `r COM <= threshold`, red for `r COM > threshold`.
 2. `ro COM` vs pose number.
 
 Pose number is the 1-based order found in the ligand PDB file.
