@@ -164,6 +164,20 @@ class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHel
         kwargs.setdefault("width", 110)
         super().__init__(*args, **kwargs)
 
+    def _get_help_string(self, action: argparse.Action) -> str:
+        help_text = action.help
+        if help_text is None:
+            help_text = ""
+
+        if "%(default)" not in help_text:
+            if action.default is not argparse.SUPPRESS:
+                defaulting_nargs = [argparse.OPTIONAL, argparse.ZERO_OR_MORE]
+                if action.option_strings or action.nargs in defaulting_nargs:
+                    if action.default is not argparse.SUPPRESS:
+                        separator = "\n" if "\n" in help_text else " "
+                        help_text += f"{separator}(default: %(default)s)"
+        return help_text
+
 
 def _pose_id_to_ligid(pose_id: str) -> str:
     # pose0007 -> LIG0007
@@ -314,12 +328,24 @@ def _angle_between_vectors_deg(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.rad2deg(np.arccos(c)))
 
 
-def _write_md_profile_png(path: Path, r_com: np.ndarray, ro_com_deg: np.ndarray) -> None:
+def _md_threshold_colors(values: np.ndarray, threshold: float) -> np.ndarray:
+    """Return green/red colors for values at or below/above a threshold."""
+    return np.where(values <= threshold, "green", "red")
+
+
+def _write_md_profile_png(
+    path: Path,
+    r_com: np.ndarray,
+    ro_com_deg: np.ndarray,
+    tl_distance_threshold: float,
+) -> None:
     """Write the --pose-layer md two-panel diagnostic figure."""
     pose_numbers = np.arange(1, len(r_com) + 1, dtype=int)
+    md_point_colors = _md_threshold_colors(r_com, tl_distance_threshold)
     fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
 
-    axes[0].plot(pose_numbers, r_com, marker="o", linewidth=1.6)
+    axes[0].plot(pose_numbers, r_com, color="#111111", linewidth=1.6)
+    axes[0].scatter(pose_numbers, r_com, c=md_point_colors, s=36, zorder=3)
     axes[0].set_xlabel("Pose number")
     axes[0].set_ylabel("r COM (Å)")
     axes[0].set_title("r vs pose number")
@@ -660,16 +686,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=None,
         help=(
-            "How peptide poses are drawn on the 2D map. "
-            "You can pass this flag multiple times (or comma-separate values) to draw multiple layers. "
-            "Layers are composited in fixed top-to-bottom order: centroid, md, scatter, trace, hexbin, density. "
-            "Choices: "
-            "'scatter' = plot one marker per pose (best for small N or top-N subsets); "
-            "'density' = smooth heatmap on a regular lon/lat grid (good default for many poses); "
-            "'hexbin' = hexagonal bin counts (crisper binned view, less smoothing than density); "
-            "'trace' = draw peptide backbone trace (Cα atoms + connecting line) for selected pose(s); "
-            "'centroid' = one marker per cluster centroid, labeled as 'rank:size\n<cluster_avg_vina>' (example: 1:215\n<-8.34>); "
-            "'md' = connect ligand heavy-atom COMs in PDB MODEL order, marking first with a filled triangle and last with a filled circle, and write _md CSV/PNG outputs.\n"
+            "How peptide poses are drawn on the 2D map. Repeat this flag or comma-separate values.\n"
+            "Layer order: centroid, md, scatter, trace, hexbin, density.\n"
+            "Choices:\n"
+            "  scatter  - one marker per pose (best for small N or top-N subsets)\n"
+            "  density  - smooth heatmap on a regular lon/lat grid\n"
+            "  hexbin   - hexagonal bin counts, crisper and less smoothed than density\n"
+            "  trace    - peptide backbone trace (Cα atoms + connecting line) for selected pose(s)\n"
+            "  centroid - one marker per cluster centroid, labeled as rank:size/<cluster_avg_vina>\n"
+            "             (example: 1:215/<-8.34>)\n"
+            "  md       - connect ligand heavy-atom COMs in PDB MODEL order; mark first with a\n"
+            "             filled triangle and last with a filled circle; write _md CSV/PNG outputs\n"
             "Examples:\n"
             "  --pose-layer density\n"
             "  --pose-layer centroid --pose-layer scatter\n"
@@ -724,6 +751,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "Gaussian smoothing width (in density-grid pixels) for --pose-layer density. "
             "Smaller values make broader/smoother density blobs; "
             "larger values make the density tighter/sharper around cluster members."
+        ),
+    )
+    g_adv.add_argument(
+        "--pose-layer-md-TL-distance",
+        type=float,
+        default=16.0,
+        help=(
+            "TL-distance threshold in Å for --pose-layer md point coloring. "
+            "MD COM points with r COM <= this value are green; points above it are red."
         ),
     )
     g_adv.add_argument(
@@ -850,6 +886,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--cluster-distance must be > 0 degrees.")
     if args.pose_density_sigma <= 0:
         raise SystemExit("--pose-density-sigma must be > 0.")
+    if args.pose_layer_md_TL_distance <= 0:
+        raise SystemExit("--pose-layer-md-TL-distance must be > 0 Å.")
 
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
@@ -1392,7 +1430,8 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Wrote CSV: %s", md_csv)
 
         md_png = out_prefix.with_name(out_prefix.name + "_md.png")
-        _write_md_profile_png(md_png, md_r_com, md_ro_com_deg)
+        md_point_colors = _md_threshold_colors(md_r_com, args.pose_layer_md_TL_distance)
+        _write_md_profile_png(md_png, md_r_com, md_ro_com_deg, args.pose_layer_md_TL_distance)
         log.info("Wrote MD profile figure: %s", md_png)
 
     fig_path = out_prefix.with_suffix("." + args.format)
@@ -1461,6 +1500,7 @@ def main(argv: list[str] | None = None) -> int:
             trace_labels=trace_labels,
             md_theta=md_theta,
             md_phi=md_phi,
+            md_point_colors=md_point_colors if "md" in args.pose_layer else None,
             cluster_ids=cluster_ids,
             cluster_theta=cluster_theta,
             cluster_phi=cluster_phi,

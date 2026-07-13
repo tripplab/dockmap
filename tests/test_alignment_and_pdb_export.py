@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dockmap.cli import _angle_between_vectors_deg, _kabsch_rigid_transform, _normalize_pose_layers, _pose_heavy_atom_cog, _rmsd
+from dockmap.cli import _angle_between_vectors_deg, _build_parser, _kabsch_rigid_transform, _md_threshold_colors, _normalize_pose_layers, _pose_heavy_atom_cog, _rmsd
 from dockmap.io import AtomRecord, Pose, parse_pdb_atoms, write_pdb_atoms, write_pdb_poses
 
 
@@ -49,6 +49,16 @@ class MdPoseLayerTests(unittest.TestCase):
     def test_angle_between_vectors_is_degrees(self):
         angle = _angle_between_vectors_deg(np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
         self.assertAlmostEqual(angle, 90.0)
+
+    def test_md_threshold_colors_include_threshold_as_green(self):
+        colors = _md_threshold_colors(np.array([15.9, 16.0, 16.1]), 16.0)
+        np.testing.assert_array_equal(colors, np.array(["green", "green", "red"]))
+
+    def test_pose_layer_help_is_structured(self):
+        help_text = _build_parser().format_help()
+        self.assertIn("  scatter  - one marker per pose", help_text)
+        self.assertIn("rank:size/<cluster_avg_vina>", help_text)
+        self.assertNotIn("rank:size\n", help_text)
 
 
 class PdbExportTests(unittest.TestCase):
