@@ -39,6 +39,7 @@ Given one or more docking **sets** (repeatable `--set`), each containing:
    - compute the peptide center (COM or COG)
    - project it to the protein surface
    - map that surface point to spherical coordinates `(theta, phi)`
+   - optionally recenter all angular coordinates on a selected pose with `--center-pose [N]`
    - project `(theta, phi)` to a 2D map projection (`equirect`, `mollweide`, or `hammer`)
 5. Convert the PPI residue list to a 2D footprint.
 6. Create a 2D figure showing:
@@ -228,6 +229,18 @@ dockmap \
   --out-prefix docking_map
 ```
 
+Example centered run (place the first pose at `theta=0, phi=0`):
+
+```bash
+dockmap \
+  --set s1:protein.pdb:peptide_poses.pdb:vina_scores.txt \
+  --ppi-file ppi.txt \
+  --center-pose \
+  --out-prefix docking_map_centered
+```
+
+Use `--center-pose N` to center on a specific 1-based pose number, for example `--center-pose 5`.
+
 Example trajectory-style COM run (`md` layer):
 
 ```bash
@@ -283,7 +296,7 @@ Column meanings:
 
 - `X COM`, `Y COM`, `Z COM`: heavy-atom ligand COM coordinates in the aligned/reference frame.
 - `r COM`: distance from the protein center to the ligand COM, in Å.
-- `theta COM`, `phi COM`: angular coordinates used by the map after seam rotation, written in radians.
+- `theta COM`, `phi COM`: angular coordinates used by the map after seam rotation and any `--center-pose` offsets, written in radians.
 - `ro COM`: angle in degrees between each pose COM vector and the first pose COM vector.
 
 The `*_md.png` file contains two panels:
@@ -328,6 +341,25 @@ If matplotlib complains about display/X11:
 ```bash
 export MPLBACKEND=Agg
 ```
+
+### Pose-centered angular origin (`--center-pose [N]`)
+
+Use `--center-pose` to move the angular origin of the map to a selected peptide pose.
+The optional `N` is a **1-based pose number**; if omitted, pose `1` is used.
+After peptide centers are read and mapped to the surface, `dockmap` computes theta/phi offsets from the selected pose's peptide COM so that the selected pose is written and plotted at `theta=0, phi=0`.
+The same offsets are then applied consistently to every angular layer: mapped poses, PPI contour and residue-point overlays, background mesh coordinates, trace lines, cluster centroids, and MD COM trajectories.
+
+Examples:
+
+```bash
+# Center on the first pose
+dockmap ... --center-pose
+
+# Center on pose number 5
+dockmap ... --center-pose 5
+```
+
+`--center-pose` composes with `--seam-rotate`: seam rotation is calculated first, then the pose-centering offsets are added so the selected pose still lands at the angular origin.
 
 ### Pose clustering
 
