@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dockmap.cli import _angle_between_vectors_deg, _build_parser, _kabsch_rigid_transform, _md_threshold_colors, _normalize_pose_layers, _pose_heavy_atom_cog, _rmsd
+from dockmap.cli import _angle_between_vectors_deg, _apply_center_pose_offsets, _build_parser, _kabsch_rigid_transform, _md_threshold_colors, _normalize_pose_layers, _pose_heavy_atom_cog, _rmsd
 from dockmap.io import AtomRecord, Pose, parse_pdb_atoms, write_pdb_atoms, write_pdb_poses
 
 
@@ -58,7 +58,28 @@ class MdPoseLayerTests(unittest.TestCase):
         help_text = _build_parser().format_help()
         self.assertIn("  scatter  - one marker per pose", help_text)
         self.assertIn("rank:size/<cluster_avg_vina>", help_text)
+        self.assertIn("--center-pose [N]", help_text)
+        self.assertIn("Use --center-pose with no value to center on pose 1", help_text)
+        self.assertIn("dockmap ... --center-pose 3 --pose-layer scatter", help_text)
         self.assertNotIn("rank:size\n", help_text)
+
+    def test_center_pose_parser_defaults_to_first_pose_when_value_omitted(self):
+        args = _build_parser().parse_args([
+            "--set",
+            "s1:target.pdb:poses.pdb:scores.txt",
+            "--ppi-file",
+            "ppi.txt",
+            "--center-pose",
+        ])
+        self.assertEqual(args.center_pose, 1)
+
+    def test_center_pose_offsets_shift_reference_to_zero_zero(self):
+        theta = np.array([0.75, -0.25, 1.25], dtype=float)
+        phi = np.array([1.10, 1.20, 1.30], dtype=float)
+        centered_theta, centered_phi = _apply_center_pose_offsets(theta, phi, -theta[0], -phi[0])
+        self.assertAlmostEqual(centered_theta[0], 0.0)
+        self.assertAlmostEqual(centered_phi[0], 0.0)
+        np.testing.assert_allclose(centered_phi, np.array([0.0, 0.10, 0.20]))
 
 
 class PdbExportTests(unittest.TestCase):

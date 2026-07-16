@@ -280,6 +280,16 @@ POSE_LAYER_CHOICES = ("scatter", "density", "hexbin", "trace", "centroid", "md")
 POSE_LAYER_ORDER_TOP_TO_BOTTOM = ("centroid", "md", "scatter", "trace", "hexbin", "density")
 
 
+def _apply_center_pose_offsets(
+    theta: np.ndarray,
+    phi: np.ndarray,
+    theta_offset_rad: float,
+    phi_offset_rad: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply shared angular offsets used by --center-pose."""
+    return apply_seam_rotation(theta, theta_offset_rad), np.asarray(phi, dtype=float) + phi_offset_rad
+
+
 def _normalize_pose_layers(raw_layers: list[str] | None) -> list[str]:
     """Normalize, validate, deduplicate, and order selected pose layers."""
     if raw_layers is None or len(raw_layers) == 0:
@@ -375,6 +385,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  dockmap --set s1:prot.pdb:poses.pdb:scores.txt --ppi-file ppi.txt\n"
             "  dockmap ... --map hammer --pose-layer centroid --cluster-contour outline\n"
+            "  dockmap ... --center-pose 3 --pose-layer scatter\n"
             "  dockmap ... --cluster-contour filled --cluster-contour-color black"
         ),
     )
@@ -620,6 +631,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "Use 'auto' to place the seam away from the main pose cluster, or provide a number (degrees) "
             "to rotate longitude by that amount before 2D projection. "
             "Use 0 for no rotation. Example: --seam-rotate 90."
+        ),
+    )
+    g_proj.add_argument(
+        "--center-pose",
+        nargs="?",
+        const=1,
+        default=None,
+        type=int,
+        metavar="N",
+        help=(
+            "Recenter all angular map coordinates on pose number N (1-based). "
+            "Use --center-pose with no value to center on pose 1. The selected pose's peptide COM lands at "
+            "theta=0, phi=0, and the same theta/phi offsets are applied to poses, PPI overlays, "
+            "background, traces, and MD COMs."
         ),
     )
     g_proj.add_argument(
@@ -888,6 +913,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--pose-density-sigma must be > 0.")
     if args.pose_layer_md_TL_distance <= 0:
         raise SystemExit("--pose-layer-md-TL-distance must be > 0 Å.")
+    if args.center_pose is not None and args.center_pose < 1:
+        raise SystemExit("--center-pose must be a 1-based pose number (>= 1).")
 
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
@@ -1157,7 +1184,7 @@ def main(argv: list[str] | None = None) -> int:
 
     log.info("Mapped poses: %d", len(pose_theta))
 
-    # ---- Seam rotation
+    # ---- Seam rotation / optional pose-centered angular offsets
     if args.seam_rotate == "auto":
         rot = auto_seam_rotation(pose_theta, weights=None)
         log.info("Seam rotation: auto -> %.2f deg", np.rad2deg(rot))
@@ -1165,8 +1192,27 @@ def main(argv: list[str] | None = None) -> int:
         rot = np.deg2rad(float(args.seam_rotate))
         log.info("Seam rotation: user -> %.2f deg", float(args.seam_rotate))
 
-    # Apply seam rotation to pose longitudes
-    pose_theta = apply_seam_rotation(pose_theta, rot)
+    theta_offset = float(rot)
+    phi_offset = 0.0
+    if args.center_pose is not None:
+        center_pose_idx = int(args.center_pose) - 1
+        if center_pose_idx >= len(pose_theta):
+            raise SystemExit(
+                f"--center-pose {args.center_pose} requested, but only {len(pose_theta)} poses were mapped."
+            )
+        centered_ref_theta = float(apply_seam_rotation(np.array([pose_theta[center_pose_idx]], dtype=float), theta_offset)[0])
+        theta_offset += -centered_ref_theta
+        phi_offset = -float(pose_phi[center_pose_idx])
+        log.info(
+            "Center pose: pose_number=%d pose_id=%s theta_offset=%.2f deg phi_offset=%.2f deg",
+            int(args.center_pose),
+            pose_ids[center_pose_idx],
+            np.rad2deg(theta_offset),
+            np.rad2deg(phi_offset),
+        )
+
+    # Apply shared angular offsets to pose coordinates
+    pose_theta, pose_phi = _apply_center_pose_offsets(pose_theta, pose_phi, theta_offset, phi_offset)
 
     # ---- PPI overlay mapping (supports one or BOTH overlays)
     ppi_contour_theta = ppi_contour_phi = None
@@ -1196,7 +1242,7 @@ def main(argv: list[str] | None = None) -> int:
                 near_surface_eps=args.ppi_near_surface_eps,
             )
             if len(th) > 0:
-                th = apply_seam_rotation(th, rot)
+                th, ph = _apply_center_pose_offsets(th, ph, theta_offset, phi_offset)
                 ppi_contour_theta, ppi_contour_phi = th, ph
 
         if "residue_points" in ppi_modes:
@@ -1208,7 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
                 residue_point_mode=args.ppi_residue_point,
             )
             if len(th) > 0:
-                th = apply_seam_rotation(th, rot)
+                th, ph = _apply_center_pose_offsets(th, ph, theta_offset, phi_offset)
                 ppi_points_theta, ppi_points_phi = th, ph
                 ppi_points_labels = labs
             else:
@@ -1240,7 +1286,7 @@ def main(argv: list[str] | None = None) -> int:
             ph = np.empty((vtx.shape[0],), float)
             for i in range(vtx.shape[0]):
                 th[i], ph[i] = surface_point_to_spherical_uv(vtx[i], protein_center)
-            th = apply_seam_rotation(th, rot)
+            th, ph = _apply_center_pose_offsets(th, ph, theta_offset, phi_offset)
 
             if args.background == "radial":
                 sc_bg = radial_distance(mesh, protein_center)
@@ -1362,8 +1408,7 @@ def main(argv: list[str] | None = None) -> int:
                     ths.append(th)
                     phs.append(ph)
 
-                tth = apply_seam_rotation(np.array(ths, float), rot)
-                tph = np.array(phs, float)
+                tth, tph = _apply_center_pose_offsets(np.array(ths, float), np.array(phs, float), theta_offset, phi_offset)
                 trace_lines.append((tth, tph))
                 trace_labels.append(_pose_id_to_ligid(tr_pose.pose_id))
 
@@ -1403,8 +1448,7 @@ def main(argv: list[str] | None = None) -> int:
                 phs.append(ph)
 
             md_com_xyz = np.array(com_rows, dtype=float)
-            md_theta = apply_seam_rotation(np.array(ths, dtype=float), rot)
-            md_phi = np.array(phs, dtype=float)
+            md_theta, md_phi = _apply_center_pose_offsets(np.array(ths, dtype=float), np.array(phs, dtype=float), theta_offset, phi_offset)
             md_r_com = np.array(rs, dtype=float)
 
             first_vec = md_com_xyz[0] - protein_center
