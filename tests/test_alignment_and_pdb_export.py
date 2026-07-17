@@ -60,7 +60,8 @@ class MdPoseLayerTests(unittest.TestCase):
         self.assertIn("rank:size/<cluster_avg_vina>", help_text)
         self.assertIn("--center-pose [N]", help_text)
         self.assertIn("Use --center-pose with no value to center on pose 1", help_text)
-        self.assertIn("dockmap ... --center-pose 3 --pose-layer scatter", help_text)
+        self.assertIn("--center-theta-phi THETA_DEG PHI_DEG", help_text)
+        self.assertIn("dockmap ... --center-pose 3 --center-theta-phi 45 90 --pose-layer scatter", help_text)
         self.assertNotIn("rank:size\n", help_text)
 
     def test_center_pose_parser_defaults_to_first_pose_when_value_omitted(self):
@@ -72,6 +73,22 @@ class MdPoseLayerTests(unittest.TestCase):
             "--center-pose",
         ])
         self.assertEqual(args.center_pose, 1)
+        self.assertEqual(tuple(args.center_theta_phi), (0.0, 0.0))
+
+    def test_center_theta_phi_parser_accepts_target_degrees(self):
+        args = _build_parser().parse_args([
+            "--set",
+            "s1:target.pdb:poses.pdb:scores.txt",
+            "--ppi-file",
+            "ppi.txt",
+            "--center-pose",
+            "3",
+            "--center-theta-phi",
+            "45",
+            "90",
+        ])
+        self.assertEqual(args.center_pose, 3)
+        self.assertEqual(args.center_theta_phi, [45.0, 90.0])
 
     def test_center_pose_offsets_shift_reference_to_zero_zero(self):
         theta = np.array([0.75, -0.25, 1.25], dtype=float)
@@ -80,6 +97,15 @@ class MdPoseLayerTests(unittest.TestCase):
         self.assertAlmostEqual(centered_theta[0], 0.0)
         self.assertAlmostEqual(centered_phi[0], 0.0)
         np.testing.assert_allclose(centered_phi, np.array([0.0, 0.10, 0.20]))
+
+    def test_center_pose_offsets_shift_reference_to_custom_target(self):
+        theta = np.array([0.75, -0.25, 1.25], dtype=float)
+        phi = np.array([1.10, 1.20, 1.30], dtype=float)
+        target_theta = np.deg2rad(45.0)
+        target_phi = np.deg2rad(90.0)
+        centered_theta, centered_phi = _apply_center_pose_offsets(theta, phi, target_theta - theta[0], target_phi - phi[0])
+        self.assertAlmostEqual(centered_theta[0], target_theta)
+        self.assertAlmostEqual(centered_phi[0], target_phi)
 
 
 class PdbExportTests(unittest.TestCase):

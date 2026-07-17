@@ -39,7 +39,7 @@ Given one or more docking **sets** (repeatable `--set`), each containing:
    - compute the peptide center (COM or COG)
    - project it to the protein surface
    - map that surface point to spherical coordinates `(theta, phi)`
-   - optionally recenter all angular coordinates on a selected pose with `--center-pose [N]`
+   - optionally recenter all angular coordinates on a selected pose with `--center-pose [N]`, using `--center-theta-phi THETA_DEG PHI_DEG` when the selected pose should land somewhere other than `0,0`
    - project `(theta, phi)` to a 2D map projection (`equirect`, `mollweide`, or `hammer`)
 5. Convert the PPI residue list to a 2D footprint.
 6. Create a 2D figure showing:
@@ -346,7 +346,8 @@ export MPLBACKEND=Agg
 
 Use `--center-pose` to move the angular origin of the map to a selected peptide pose.
 The optional `N` is a **1-based pose number**; if omitted, pose `1` is used.
-After peptide centers are read and mapped to the surface, `dockmap` computes theta/phi offsets from the selected pose's peptide COM so that the selected pose is written and plotted at `theta=0, phi=0`.
+After peptide centers are read and mapped to the surface, `dockmap` computes theta/phi offsets from the selected pose's peptide COM so that the selected pose is written and plotted at `theta=0, phi=0` by default.
+Use `--center-theta-phi THETA_DEG PHI_DEG` with `--center-pose` to place the selected pose at a different target angular coordinate, specified in degrees.
 The same offsets are then applied consistently to every angular layer: mapped poses, PPI contour and residue-point overlays, background mesh coordinates, trace lines, cluster centroids, and MD COM trajectories.
 
 Examples:
@@ -357,9 +358,12 @@ dockmap ... --center-pose
 
 # Center on pose number 5
 dockmap ... --center-pose 5
+
+# Center on pose number 5 and place it at theta=45°, phi=90°
+dockmap ... --center-pose 5 --center-theta-phi 45 90
 ```
 
-`--center-pose` composes with `--seam-rotate`: seam rotation is calculated first, then the pose-centering offsets are added so the selected pose still lands at the angular origin.
+`--center-pose` composes with `--seam-rotate`: seam rotation is calculated first, then the pose-centering offsets are added so the selected pose still lands at the requested angular target (`theta=0, phi=0` unless `--center-theta-phi` is provided).
 
 ### Pose clustering
 

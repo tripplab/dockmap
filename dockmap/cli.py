@@ -385,7 +385,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  dockmap --set s1:prot.pdb:poses.pdb:scores.txt --ppi-file ppi.txt\n"
             "  dockmap ... --map hammer --pose-layer centroid --cluster-contour outline\n"
-            "  dockmap ... --center-pose 3 --pose-layer scatter\n"
+            "  dockmap ... --center-pose 3 --center-theta-phi 45 90 --pose-layer scatter\n"
             "  dockmap ... --cluster-contour filled --cluster-contour-color black"
         ),
     )
@@ -642,9 +642,21 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=(
             "Recenter all angular map coordinates on pose number N (1-based). "
-            "Use --center-pose with no value to center on pose 1. The selected pose's peptide COM lands at "
-            "theta=0, phi=0, and the same theta/phi offsets are applied to poses, PPI overlays, "
+            "Use --center-pose with no value to center on pose 1. By default the selected pose's "
+            "peptide COM lands at theta=0, phi=0; use --center-theta-phi to choose a different "
+            "target location. The same theta/phi offsets are applied to poses, PPI overlays, "
             "background, traces, and MD COMs."
+        ),
+    )
+    g_proj.add_argument(
+        "--center-theta-phi",
+        nargs=2,
+        type=float,
+        default=(0.0, 0.0),
+        metavar=("THETA_DEG", "PHI_DEG"),
+        help=(
+            "Target angular location, in degrees, for the pose selected by --center-pose. "
+            "Default: 0 0. Example: --center-pose 3 --center-theta-phi 45 90."
         ),
     )
     g_proj.add_argument(
@@ -915,6 +927,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--pose-layer-md-TL-distance must be > 0 Å.")
     if args.center_pose is not None and args.center_pose < 1:
         raise SystemExit("--center-pose must be a 1-based pose number (>= 1).")
+    if args.center_pose is None and tuple(args.center_theta_phi) != (0.0, 0.0):
+        raise SystemExit("--center-theta-phi requires --center-pose.")
 
     log.info("dockmap pipeline start")
     log.debug("Arguments: %s", vars(args))
@@ -1200,13 +1214,16 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(
                 f"--center-pose {args.center_pose} requested, but only {len(pose_theta)} poses were mapped."
             )
+        target_theta, target_phi = np.deg2rad(np.asarray(args.center_theta_phi, dtype=float))
         centered_ref_theta = float(apply_seam_rotation(np.array([pose_theta[center_pose_idx]], dtype=float), theta_offset)[0])
-        theta_offset += -centered_ref_theta
-        phi_offset = -float(pose_phi[center_pose_idx])
+        theta_offset += float(target_theta) - centered_ref_theta
+        phi_offset = float(target_phi) - float(pose_phi[center_pose_idx])
         log.info(
-            "Center pose: pose_number=%d pose_id=%s theta_offset=%.2f deg phi_offset=%.2f deg",
+            "Center pose: pose_number=%d pose_id=%s target_theta=%.2f deg target_phi=%.2f deg theta_offset=%.2f deg phi_offset=%.2f deg",
             int(args.center_pose),
             pose_ids[center_pose_idx],
+            np.rad2deg(target_theta),
+            np.rad2deg(target_phi),
             np.rad2deg(theta_offset),
             np.rad2deg(phi_offset),
         )
