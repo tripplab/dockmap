@@ -243,7 +243,7 @@ def _ppi_contour_level_index_max_for_centroids(
 
 def _extract_ca_trace_atoms(peptide_atoms: list[AtomRecord]) -> list[AtomRecord]:
     """
-    Return Cα atoms in peptide, in N->C order as they appear in the PDB.
+    Return CA atoms in peptide, in N->C order as they appear in the PDB.
     (We assume the peptide file is ordered; for cyclic peptides, this is still a consistent traversal.)
     """
     return [a for a in peptide_atoms if a.name.strip().upper() == "CA"]
@@ -493,7 +493,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["residue_points", "atom_contour"],
         default=None,
         help=(
-            "How to display the protein–protein interface (PPI) region on the 2D map. "
+            "How to display the protein-protein interface (PPI) region on the 2D map. "
             "You can provide this option multiple times to enable multiple overlays. "
             "If omitted, defaults to 'atom_contour'.\n"
             "Examples:\n"
@@ -512,7 +512,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "When --ppi-footprint residue_points, choose the representative point for each residue. "
             "Choices: "
-            "'ca' = Cα atom (or residue mean if missing); "
+            "'ca' = CA atom (or residue mean if missing); "
             "'res_com' = center of geometry of all atoms in the residue; "
             "'sc_com' = center of geometry of side-chain atoms only (falls back to residue mean if no side-chain atoms)."
         ),
@@ -717,7 +717,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  scatter  - one marker per pose (best for small N or top-N subsets)\n"
             "  density  - smooth heatmap on a regular lon/lat grid\n"
             "  hexbin   - hexagonal bin counts, crisper and less smoothed than density\n"
-            "  trace    - peptide backbone trace (Cα atoms + connecting line) for selected pose(s)\n"
+            "  trace    - peptide backbone trace (CA atoms + connecting line) for selected pose(s)\n"
             "  centroid - one marker per cluster centroid, labeled as rank:size/<cluster_avg_vina>\n"
             "             (example: 1:215/<-8.34>)\n"
             "  md       - connect ligand heavy-atom COMs in PDB MODEL order; mark first with a\n"
@@ -805,7 +805,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0,
         help=(
             "Number of neighbor-averaging iterations applied to the background scalar on the mesh before plotting. "
-            "Use 0 for no smoothing; small values (e.g., 2–5) reduce noise and produce a cleaner relief."
+            "Use 0 for no smoothing; small values (e.g., 2-5) reduce noise and produce a cleaner relief."
         ),
     )
     g_adv.add_argument(
